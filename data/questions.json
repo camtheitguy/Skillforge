@@ -1,0 +1,1005 @@
+{
+  "version": "2.0",
+  "domains": {
+    "helpdesk": {
+      "label": "Help Desk / SysAdmin",
+      "icon": "🖥️",
+      "color": "#00e5ff",
+      "questions": [
+        {
+          "id": "hd001",
+          "difficulty": "foundational",
+          "type": "mcq",
+          "question": "A user's PC shows IP address 169.254.88.34. They cannot reach anything on the network but can still log in locally. What is the correct explanation and first action?",
+          "options": [
+            "The DNS server is unreachable — flush the DNS cache with ipconfig /flushdns",
+            "The subnet mask is misconfigured — manually change it from /16 to /24",
+            "The machine received an APIPA address because DHCP failed — verify DHCP server reachability then run ipconfig /release && ipconfig /renew",
+            "The default gateway is missing — add it manually in network adapter settings"
+          ],
+          "answer": "C",
+          "explanation": "169.254.x.x is an APIPA (Automatic Private IP Addressing) address — Windows self-assigns this when DHCP is unreachable. Causes: DHCP server is down, scope is exhausted, switch port VLAN misconfiguration blocking DHCP packets (ports 67/68 UDP). Diagnosis: check DHCP server console for scope exhaustion, verify switch port VLAN assignment, confirm DHCP service is running. Then release/renew. If it persists, check the DHCP Client service on the workstation (services.msc).",
+          "lab": {
+            "title": "Home Lab: DHCP Failure Simulation",
+            "steps": "1) In your home lab DC, stop the DHCP Server service. 2) On a joined VM, run ipconfig /release && ipconfig /renew. 3) Observe the APIPA address assignment. 4) Restart DHCP service. 5) Practice narrowing down scope exhaustion by setting a small pool (e.g., 5 addresses) and joining 6 VMs."
+          }
+        },
+        {
+          "id": "hd002",
+          "difficulty": "foundational",
+          "type": "mcq",
+          "question": "A technician creates a new user in Active Directory. The user can log in but receives 'Access Denied' on a shared folder that their department group should access. What is the most precise next step?",
+          "options": [
+            "Add the user directly to the local Administrators group on the file server",
+            "Check both Share permissions AND NTFS permissions — effective access is the most restrictive intersection of both, and new users often miss NTFS inheritance",
+            "Reset the user's Kerberos ticket by logging off and back on",
+            "Restart the Server service on the file server to clear stale ACL cache"
+          ],
+          "answer": "B",
+          "explanation": "Windows file access has two layers: Share Permissions (network-level, set on the share) and NTFS Permissions (file system level). The effective permission is the most restrictive combination. New users are commonly missing from NTFS ACLs even when share permissions look correct. Use the 'Effective Access' tab in the folder's Advanced Security Settings — enter the username and it shows exactly what they can/cannot do and why. Never grant local Administrators for a simple share access issue.",
+          "lab": {
+            "title": "Home Lab: Share vs NTFS Permissions",
+            "steps": "1) Create a shared folder on your Windows Server VM. 2) Set Share Permissions to 'Everyone: Full Control'. 3) Set NTFS permissions to only allow one specific test user. 4) Try accessing from another user — observe denial. 5) Then reverse it: NTFS full control, Share read-only. 6) Document what happens in each scenario. This is a fundamental real-world troubleshooting pattern."
+          }
+        },
+        {
+          "id": "hd003",
+          "difficulty": "intermediate",
+          "type": "mcq",
+          "question": "You link a new GPO at the domain level to enforce a screensaver lock policy. Three weeks later, the help desk reports some machines in the Marketing OU still aren't applying it. GPRESULT /R on affected machines shows the GPO in 'Applied GPOs.' What is the most likely explanation?",
+          "options": [
+            "The GPO requires a specific Windows build version that Marketing machines don't have",
+            "The screensaver settings are under User Configuration — if only Computer Configuration was checked, users haven't triggered the user-side policy refresh yet",
+            "The Marketing OU has Block Inheritance enabled, overriding the domain-level GPO",
+            "GPRESULT /R showing the GPO as applied means the settings ARE applying — the help desk is wrong"
+          ],
+          "answer": "C",
+          "explanation": "If GPRESULT shows the GPO in the 'Denied GPOs' section with reason 'Block Inheritance' that's the culprit. However, the tricky scenario: GPRESULT showing 'Applied' but settings not taking effect can also happen when a *lower-priority* GPO with conflicting settings overwrites the higher one — last-write-wins unless enforced. Also check: if the GPO is set to 'Enforced', Block Inheritance is bypassed. Run GPRESULT /H report.html for full detail including which specific registry values each GPO wrote. Use RSOP.msc for a visual view of final applied settings.",
+          "lab": {
+            "title": "Home Lab: GPO Conflict Resolution",
+            "steps": "1) Create two GPOs: GPO-A sets screensaver timeout to 5 minutes, GPO-B sets it to 30 minutes. 2) Link both to the same OU. 3) Observe which wins (lower link order number = higher priority). 4) Enable 'Enforced' on GPO-A and observe it now overrides GPO-B. 5) Enable 'Block Inheritance' on a child OU and test which GPOs are filtered. Use GPRESULT /H to document each scenario."
+          }
+        },
+        {
+          "id": "hd004",
+          "difficulty": "intermediate",
+          "type": "open",
+          "question": "Walk through exactly what happens during a Windows domain logon — from the user pressing Ctrl+Alt+Del to the desktop appearing. Include Kerberos, the KDC, TGT, service tickets, and GPO application order.",
+          "idealResponse": "1) User presses Ctrl+Alt+Del — LSASS (Local Security Authority Subsystem Service) handles the secure attention sequence. 2) User enters credentials — LSASS contacts the nearest Domain Controller (found via DNS SRV records: _ldap._tcp.dc._msdcs.domain.com). 3) Kerberos AS-REQ: LSASS sends an Authentication Service Request to the KDC (Key Distribution Center — runs on every DC). The KDC verifies credentials against AD and issues a TGT (Ticket Granting Ticket) encrypted with the krbtgt account's key. 4) The TGT is stored in LSASS memory — never leaves the machine in plaintext. 5) When the user accesses a resource (e.g., file share \\\\server\\share), LSASS presents the TGT to the KDC's TGS (Ticket Granting Service) and requests a Service Ticket for that specific resource. 6) The Service Ticket is presented directly to the resource — the resource decrypts it with its own service account key. 7) GPO application: Computer policies applied first (at boot), User policies applied at logon. Order: Local → Site → Domain → OU (last applied wins, unless Enforced). Loopback processing can reverse this for kiosk/terminal scenarios. 8) If Kerberos fails (e.g., resource accessed by IP instead of FQDN, or time skew > 5 minutes), Windows falls back to NTLM — which is a challenge-response protocol with no KDC involvement. NTLM has no mutual authentication and is vulnerable to pass-the-hash.",
+          "lab": {
+            "title": "Home Lab: Observe Kerberos Live",
+            "steps": "1) On your domain-joined VM, open Wireshark and filter 'kerberos'. 2) Log off and log back in — observe AS-REQ/AS-REP (TGT exchange) and TGS-REQ/TGS-REP (service ticket). 3) Run 'klist' in cmd to see all cached Kerberos tickets. 4) Access a network share and watch the TGS exchange in Wireshark. 5) Try accessing the same share by IP instead of hostname — observe NTLM fallback in the packet capture."
+          }
+        },
+        {
+          "id": "hd005",
+          "difficulty": "intermediate",
+          "type": "mcq",
+          "question": "After enabling BitLocker on all laptops via GPO, a remote user calls saying their laptop is stuck on the BitLocker recovery screen after a BIOS update. They don't have their recovery key. Where is the recovery key stored if your GPO was configured correctly for an AD-joined environment?",
+          "options": [
+            "Stored locally in C:\\Windows\\System32\\Recovery — accessible from the BitLocker recovery screen",
+            "Backed up to the computer object in Active Directory — retrieve it from AD Users and Computers > Computer Properties > BitLocker Recovery tab, or via PowerShell",
+            "Emailed to the user's M365 account automatically upon BitLocker activation",
+            "Stored in the TPM chip — accessible by booting into UEFI settings"
+          ],
+          "answer": "B",
+          "explanation": "When GPO is configured with 'Store BitLocker recovery information in Active Directory Domain Services' enabled (which it should be), the 48-digit recovery key is backed up to the computer's AD object. Retrieve via: ADUC > Computer > right-click Properties > BitLocker Recovery tab. Or PowerShell: Get-ADObject -Filter {objectClass -eq 'msFVE-RecoveryInformation'} -SearchBase 'CN=ComputerName,...' -Properties msFVE-RecoveryPassword. In Entra/Intune environments, keys are in Entra ID > Devices > device > BitLocker keys. BIOS updates commonly invalidate TPM measurements, triggering recovery mode — this is expected and non-malicious.",
+          "lab": {
+            "title": "Home Lab: BitLocker + AD Key Backup",
+            "steps": "1) Enable BitLocker on a VM (requires TPM or use 'Allow BitLocker without compatible TPM' GPO setting for VMs). 2) Configure GPO: Computer Config > Admin Templates > Windows Components > BitLocker > Operating System Drives > 'Store recovery information in AD DS.' 3) Enable BitLocker — verify the key backed up to AD. 4) Retrieve it via ADUC. 5) Simulate recovery by suspending protection and re-enabling — observe new key generation."
+          }
+        },
+        {
+          "id": "hd006",
+          "difficulty": "advanced",
+          "type": "mcq",
+          "question": "You discover that a technician inadvertently deleted an OU containing 200 user accounts three days ago. The AD Recycle Bin was NOT enabled. What are your recovery options, and which is most viable?",
+          "options": [
+            "AD objects are permanently gone without Recycle Bin — restore from backup is the only option",
+            "Use ntdsutil to perform an authoritative restore from the most recent System State backup, then mark the OU as authoritative to prevent replication from re-deleting it, then re-sync with the backup's state",
+            "Run ldifde -f export.ldf to export remaining AD data and reimport the deleted objects",
+            "Contact Microsoft support — they can restore AD objects from Azure AD backup within 30 days"
+          ],
+          "answer": "B",
+          "explanation": "Without AD Recycle Bin, recovery requires an authoritative restore: 1) Boot DC into DSRM (Directory Services Restore Mode) using the DSRM password. 2) Restore System State backup using Windows Server Backup. 3) Before allowing the DC to replicate, run ntdsutil and mark the restored OU as authoritative (ntdsutil → authoritative restore → restore subtree 'OU=deleted,DC=domain,DC=com'). 4) The authoritative restore increments USN version numbers so replication partners accept the restored objects instead of replicating the deletion back. 5) Restart normally — replication propagates the restored objects to other DCs. Lesson: always enable AD Recycle Bin (requires Forest Functional Level 2008 R2+) and take regular System State backups.",
+          "lab": {
+            "title": "Home Lab: AD Recycle Bin & Recovery",
+            "steps": "1) In your 2-DC lab, enable AD Recycle Bin: Enable-ADOptionalFeature 'Recycle Bin Feature' -Scope ForestOrConfigurationSet -Target 'lab.local'. 2) Create a test OU with 5 users. 3) Delete the OU. 4) Restore with: Get-ADObject -Filter {isDeleted -eq $true -and Name -like '*TestOU*'} -IncludeDeletedObjects | Restore-ADObject. 5) Then test without Recycle Bin: disable it (you can't — document why enabling it before you need it matters)."
+          }
+        },
+        {
+          "id": "hd007",
+          "difficulty": "advanced",
+          "type": "open",
+          "question": "Design the OU structure and Group Policy architecture for an MSP managing 5 client companies in a single AD forest with child domains. Include delegation, GPO inheritance, and how you'd prevent one client's GPO from affecting another.",
+          "idealResponse": "Forest design: Create child domains per client (client1.msp.local, client2.msp.local) for true isolation — cross-domain GPOs don't apply by default. Alternatively, if single domain, use top-level OUs per client (OU=Client1, OU=Client2). OU structure per client: Clients\\Client1\\{Users, Computers\\{Workstations, Servers, Laptops}, ServiceAccounts, Groups, Disabled}. GPO strategy: 1) Domain-level: minimal — only baseline security (password policy — only works at domain level for default password policy). 2) Client OU level: Block Inheritance enabled — prevents forest/domain GPOs from bleeding into client OUs. 3) Client-specific GPOs linked at their OU. Delegation: Create a 'Client1-Admins' group. Delegate control on OU=Client1 for: Reset passwords, Unlock accounts, Create/delete users within OU. Use 'Delegate Control' wizard in ADUC. Never give client admins Domain Admin. MSP-level admin group stays outside client OUs with no delegation restrictions. Security: Enable 'Enforced' on any MSP-wide security baseline GPOs that must override client settings (e.g., audit policy, screen lock). Use separate DSRM passwords per client domain. Regular backup of System State per domain.",
+          "lab": {
+            "title": "Home Lab: Multi-Client OU Structure",
+            "steps": "1) Create two top-level OUs: OU=ClientA and OU=ClientB. 2) Enable Block Inheritance on each. 3) Create GPO-Security-Baseline, link at domain, mark Enforced. 4) Create GPO-ClientA-Specific, link only to OU=ClientA. 5) Create test user in each OU. 6) Run GPRESULT /H on each — verify ClientA user gets baseline + ClientA GPO but NOT ClientB GPO. 7) Practice delegating password reset to a ClientA-Admins group using Delegate Control wizard."
+          }
+        },
+        {
+          "id": "hd008",
+          "difficulty": "foundational",
+          "type": "mcq",
+          "question": "A user calls saying they're locked out of their account. You unlock it in ADUC but they get locked out again within seconds. What is happening and what do you do?",
+          "options": [
+            "The DHCP server is reassigning their IP, causing re-authentication failures",
+            "A saved credential or service running under their account is continuously attempting authentication with an old/wrong password — find the source using Account Lockout tools before unlocking",
+            "Their account has a shorter lockout threshold than the domain default — check their individual account settings",
+            "The PDC Emulator is offline and lockout status isn't replicating properly"
+          ],
+          "answer": "B",
+          "explanation": "Immediate re-lockout means something automated is hammering authentication with wrong credentials. Sources: cached Windows credentials (Credential Manager), a mapped drive with saved credentials, a scheduled task running as the user, a service configured with their account, a mobile device with old Exchange credentials. Tools: Microsoft Account Lockout and Management Tools (LockoutStatus.exe) shows which DC is processing the lockouts. EventCombMT aggregates Security event 4740 (account lockout) from all DCs to find the source machine. On the source: check Credential Manager, Task Scheduler, Services panel. Don't just unlock in a loop — find and fix the source first.",
+          "lab": {
+            "title": "Home Lab: Simulate & Diagnose Account Lockout",
+            "steps": "1) Set domain lockout threshold to 3 attempts. 2) Create a scheduled task on a VM that runs with a test user's credentials — enter the wrong password. 3) Watch the account lock out. 4) Use LockoutStatus.exe to identify the source DC processing the lockout. 5) Review Security event log (Event ID 4740) on that DC — note the Caller Computer Name field. 6) Find and fix the scheduled task. 7) Practice checking Credential Manager: Control Panel > Credential Manager > Windows Credentials."
+          }
+        },
+        {
+          "id": "hd009",
+          "difficulty": "intermediate",
+          "type": "mcq",
+          "question": "You need to deploy a software package to only Windows 10 machines in a specific OU, excluding Windows 11. GPO-based software deployment is in use. What is the cleanest way to target only Windows 10?",
+          "options": [
+            "Create two separate OUs — one for Win10, one for Win11 — and link the GPO only to the Win10 OU",
+            "Use a WMI filter on the GPO: SELECT * FROM Win32_OperatingSystem WHERE Version LIKE '10.0.19%' — this limits GPO application to matching OS versions without reorganizing OUs",
+            "Use GPO Security Filtering — remove 'Authenticated Users' and add a 'Windows10-Machines' AD group",
+            "Both B and C are valid approaches — WMI filter for OS-based targeting is cleaner; Security Filtering is better when you have a maintained group"
+          ],
+          "answer": "D",
+          "explanation": "Both are correct and have distinct trade-offs. WMI Filters: query Win32_OperatingSystem at policy application time — no group maintenance needed, but WMI filter evaluation adds processing overhead at every GPO refresh. Good for OS-version targeting. Security Filtering: remove Authenticated Users, add a specific AD group containing target computers — fast, simple, but requires maintaining group membership. Best practice: use Security Filtering for role-based targeting (servers vs. workstations) and WMI filters for attribute-based targeting (specific OS builds, hardware specs). Note: WMI filter SELECT * FROM Win32_OperatingSystem WHERE Version LIKE '10.0.1%' catches Win10; Win11 is 10.0.22H2+ so Version LIKE '10.0.22%'.",
+          "lab": {
+            "title": "Home Lab: WMI Filter Testing",
+            "steps": "1) Create a GPO with a test registry setting. 2) Create a WMI filter: New-GPWmiFilter -Name 'Win10Only' -Expression 'SELECT * FROM Win32_OperatingSystem WHERE Version LIKE \"10.0.1%\"'. 3) Attach the filter to the GPO. 4) Apply GPO to an OU with mixed OS VMs. 5) Run GPRESULT /R on each VM — verify the filter only allows Win10 machines. 6) Check GPRESULT output for 'Denied GPOs' section showing the WMI filter result."
+          }
+        },
+        {
+          "id": "hd010",
+          "difficulty": "advanced",
+          "type": "mcq",
+          "question": "A mapped drive GPO that uses 'Replace' action fails silently on machines where the drive letter is currently in use by a USB drive. Users see no error. What is the cleanest fix that doesn't require user intervention?",
+          "options": [
+            "Change the GPO action from 'Replace' to 'Update' — Update will succeed even if the drive is in use",
+            "Add a GPO preference item that runs a startup script to eject USB drives before drive mapping applies",
+            "Change the action to 'Replace' with error handling — add an Item-Level Targeting condition to only apply when the drive letter is not already mapped, preventing silent failure",
+            "Use a logon script instead of GPO preferences — scripts have better error handling than GP drive mapping"
+          ],
+          "answer": "C",
+          "explanation": "Item-Level Targeting (ILT) is the correct tool — it adds conditional logic to GPO Preference items. For drive mapping: add ILT condition 'Drive Letter does not exist [X:]' — the preference item only runs if the letter is free. Alternatively, target by connection type (domain, specific IP range) or user group membership. 'Replace' action deletes and recreates the mapping — it fails if another process holds the letter. 'Update' creates if missing but doesn't fail cleanly either when blocked. ILT solves this without any scripting. Access ILT: in the GPO drive mapping preference item > Common tab > Item-level targeting > check 'Run in logged-on user's security context' + add targeting.",
+          "lab": {
+            "title": "Home Lab: GPO Preference Item-Level Targeting",
+            "steps": "1) Create a GPO to map Z: drive to \\\\server\\share. 2) In the drive map item, go to Common tab > enable Item-level targeting. 3) Add condition: 'Drive' is NOT 'Z:'. 4) On a test VM, manually map Z: to something. 5) Apply GPO — verify the preference item is skipped. 6) Remove the manual Z: mapping. 7) Run gpupdate /force — verify the GPO now maps Z: successfully. 8) Check Application event log for Group Policy drive mapping events (Event ID 4098/4100)."
+          }
+        }
+      ]
+    },
+
+    "networking": {
+      "label": "Network Engineering",
+      "icon": "🌐",
+      "color": "#b8ff57",
+      "questions": [
+        {
+          "id": "net001",
+          "difficulty": "foundational",
+          "type": "mcq",
+          "question": "Host A (192.168.10.50/24) is trying to reach Host B (192.168.20.50/24). They're connected to the same physical switch. No traffic flows. What must be configured and why?",
+          "options": [
+            "A trunk port between the switch uplinks to carry both VLAN tags simultaneously",
+            "A crossover cable instead of straight-through between the two hosts",
+            "Inter-VLAN routing on a Layer 3 device — Layer 2 switches cannot route between subnets, hosts in different subnets must send traffic to their default gateway which forwards it to the other subnet",
+            "Static ARP entries on both hosts pointing to each other's MAC addresses"
+          ],
+          "answer": "C",
+          "explanation": "Fundamental networking: a Layer 2 switch forwards frames based on MAC addresses within a subnet but cannot route between different subnets (different network addresses). Host A's OS looks at Host B's IP, determines it's not in 192.168.10.0/24, and sends the packet to its default gateway. The gateway (L3 switch SVI, router, or firewall) routes it to 192.168.20.0/24 and forwards to Host B. Without a L3 device handling inter-VLAN routing, traffic drops silently at the gateway. Trunk ports carry multi-VLAN traffic between switches — they don't route. ARP only works within a subnet.",
+          "lab": {
+            "title": "Home Lab: Inter-VLAN Routing",
+            "steps": "1) In GNS3 or EVE-NG, create two PCs and a L3 switch. 2) Put PC1 in VLAN 10 (192.168.10.0/24) and PC2 in VLAN 20 (192.168.20.0/24). 3) Configure SVIs on the L3 switch: interface vlan 10 / ip address 192.168.10.1 255.255.255.0 and interface vlan 20 / ip address 192.168.20.1 255.255.255.0. 4) Set each PC's default gateway to the respective SVI. 5) Ping between PCs. 6) Capture with Wireshark — observe the L3 routing decision."
+          }
+        },
+        {
+          "id": "net002",
+          "difficulty": "foundational",
+          "type": "mcq",
+          "question": "On your UDM Pro home lab, you create a Guest SSID on VLAN 20. Guest devices can reach the internet but can also ping your main LAN devices on VLAN 1. What specifically did you miss?",
+          "options": [
+            "You forgot to enable 'Client Isolation' on the SSID — this blocks all guest traffic",
+            "The SSID needs to be on a separate access point, not the same one as your main network",
+            "You need a firewall rule in UniFi blocking traffic FROM the Guest network (192.168.20.0/24) TO the Main LAN (192.168.1.0/24) — VLANs isolate at Layer 2 but inter-VLAN routing allows L3 traffic without explicit firewall deny rules",
+            "VLAN 20 needs to be configured as 'Corporate' not 'Guest' in UniFi network settings"
+          ],
+          "answer": "C",
+          "explanation": "VLANs provide Layer 2 segmentation — devices on different VLANs can't directly communicate via MAC/Ethernet frames. But the UDM Pro's built-in router handles inter-VLAN routing, so VLAN 20 devices can reach VLAN 1 devices via IP routing unless explicitly blocked. Client Isolation only blocks traffic between clients on the same SSID — it does nothing for VLAN-to-VLAN routing. The fix: UniFi > Firewall Rules > Add rule: Source: Guest Network (192.168.20.0/24), Destination: Main LAN (192.168.1.0/24), Action: Drop. Allow Guest → WAN remains permitted by default.",
+          "lab": {
+            "title": "Home Lab: UDM Pro VLAN Isolation",
+            "steps": "1) Create new Network in UniFi: VLAN ID 20, 192.168.20.0/24, DHCP enabled. 2) Create Guest SSID linked to VLAN 20. 3) Connect a device to Guest SSID — verify it pings your main LAN (it will). 4) Add Firewall Rule: LAN In, Source=Network(Guest), Dest=Network(Main), Action=Drop. 5) Verify guest device can no longer ping main LAN. 6) Verify guest still has internet access. 7) Use 'Show active client traffic' in UniFi to visualize."
+          }
+        },
+        {
+          "id": "net003",
+          "difficulty": "intermediate",
+          "type": "mcq",
+          "question": "A site-to-site IPsec VPN shows IKE Phase 1 and Phase 2 established successfully, but traffic between 10.1.0.0/24 (Site A) and 10.2.0.0/24 (Site B) doesn't flow. A packet capture on Site A's firewall shows packets entering the VPN interface but nothing exits on Site B's firewall. What is the most precise cause?",
+          "options": [
+            "The pre-shared keys are mismatched — Phase 2 succeeded only partially",
+            "The encryption domain (proxy IDs / traffic selectors) are asymmetric — Site A says 'encrypt traffic from 10.1.0.0/24 to 10.2.0.0/24' but Site B has a different subnet defined, causing packets to be encrypted on one side but rejected by the other as outside the SA",
+            "MTU mismatch is causing packet fragmentation that the VPN endpoint drops silently",
+            "The VPN uses AES-256 on Site A but AES-128 on Site B — Phase 2 succeeded with degraded cipher"
+          ],
+          "answer": "B",
+          "explanation": "Phase 1 and 2 completing means IKE handshake succeeded and the Security Association (SA) was established. Traffic still not flowing after confirmed SA = traffic selector mismatch. Each side defines what traffic 'belongs' in the tunnel (the interesting traffic). If Site A encrypts 10.1.0.0/24 → 10.2.0.0/24 but Site B's SA only expects 10.1.0.0/24 → 10.2.1.0/24, Site B drops the incoming encrypted packets as 'not matching any SA.' On Cisco: check 'show crypto ipsec sa' for encrypt/decrypt counters — if encrypt increments but decrypt doesn't, the other side isn't processing it. On pfSense/OPNsense: check IPsec logs for 'TS_UNACCEPTABLE' errors.",
+          "lab": {
+            "title": "Home Lab: IPsec VPN Between Two pfSense VMs",
+            "steps": "1) Build two pfSense VMs in VirtualBox/VMware, each with LAN networks (10.1.0.0/24 and 10.2.0.0/24). 2) Configure site-to-site IPsec VPN. 3) Intentionally misconfigure Phase 2 subnet on one side. 4) Observe the traffic selector mismatch in logs. 5) Fix the subnet, verify traffic flows. 6) Use 'Diagnostics > Packet Capture' in pfSense to confirm traffic entering/exiting the VPN interface."
+          }
+        },
+        {
+          "id": "net004",
+          "difficulty": "intermediate",
+          "type": "open",
+          "question": "Explain OSPF — how it works, what LSAs are, the DR/BDR election process on a broadcast segment, and why OSPF area design matters for scalability. Include what problems arise with a single-area flat OSPF design in a large network.",
+          "idealResponse": "OSPF (Open Shortest Path First) is a link-state IGP that builds a complete map (LSDB) of the network topology. Each router floods Link State Advertisements (LSAs) describing its connected links. Every router runs Dijkstra's SPF algorithm on the LSDB to compute shortest paths. LSA types: Type 1 (Router LSA — local links), Type 2 (Network LSA — generated by DR on broadcast segments), Type 3 (Summary LSA — inter-area routes from ABR), Type 5 (External LSA — from ASBR for redistributed routes). DR/BDR Election: On multi-access broadcast segments (Ethernet), OSPF elects a Designated Router (DR) and Backup DR (BDR) to reduce adjacency overhead. Without DR/BDR, n routers would form n*(n-1)/2 adjacencies — with DR, each router forms 2 adjacencies (to DR and BDR). Election: highest Router Priority (default 1) wins; tie broken by highest Router ID (highest loopback IP or highest interface IP). Election is non-preemptive — changing priority doesn't displace current DR. Area design: All areas must connect to Area 0 (backbone). Benefits of multi-area: 1) LSA flooding is contained within an area — reduces CPU/memory on routers. 2) Route summarization possible at ABR boundaries — reduces routing table size. 3) SPF recalculation scoped to the area with the topology change. Single-area flat OSPF problems at scale: every topology change (link flap) triggers SPF on ALL routers, LSA flood storms on large networks, massive LSDB consuming memory, no summarization = every subnet in every router's table.",
+          "lab": {
+            "title": "Home Lab: Multi-Area OSPF in GNS3",
+            "steps": "1) Build 4 routers in GNS3: R1-R2 in Area 0, R3 as ABR (Area 0 + Area 1), R4 in Area 1. 2) Configure OSPF on all routers. 3) Run 'show ip ospf neighbor' — observe DR/BDR election. 4) Run 'show ip ospf database' — compare LSDB size between area routers. 5) Simulate a link flap — observe SPF recalculation scope. 6) Add a summary route on the ABR and verify it reduces routes in Area 0. 7) Use 'debug ip ospf events' to watch LSA flooding."
+          }
+        },
+        {
+          "id": "net005",
+          "difficulty": "intermediate",
+          "type": "mcq",
+          "question": "A Wireshark capture shows a server sending TCP RST-ACK in response to every SYN from a specific client. The firewall allows the traffic and packet captures confirm delivery to the server. What is the most accurate interpretation?",
+          "options": [
+            "The firewall is stateless and sending RST on the return path before the server responds",
+            "The server is actively rejecting the connection — either nothing is listening on that port, a host-based firewall is sending RST, or the application is configured to block that source IP",
+            "TCP RST-ACK indicates a NAT translation failure — the server doesn't recognize the session",
+            "The client's TCP window size is too small, causing the server to abort the connection"
+          ],
+          "answer": "B",
+          "explanation": "RST (Reset) from the destination server means the server received the packet but rejected the connection. Distinct from firewall drop (client gets no response and times out). RST causes: 1) Nothing listening on that port — check netstat -an | findstr LISTEN on Windows or ss -tlnp on Linux. 2) Host-based firewall sending RST before the app sees it. 3) Application-level blacklist by source IP. 4) TCP Wrapper or similar IP-level access control. If RST came from an intermediate device (firewall), you'd see the TTL and source IP differ from the server. RST directly from server IP = server-side rejection. Fix: confirm the service is running on the expected port, check Windows Firewall inbound rules, check application access control lists.",
+          "lab": {
+            "title": "Home Lab: Analyze TCP RST with Wireshark",
+            "steps": "1) On a Linux VM, run netcat on port 8080: nc -l 8080. 2) From another VM, connect: nc [server-ip] 8080. Observe successful connection in Wireshark. 3) Stop netcat (port no longer listening). 4) Try connecting again — observe RST in Wireshark. 5) Note the difference in packets: SYN → RST-ACK when nothing listens vs. SYN → SYN-ACK when service is running. 6) Add an iptables REJECT rule on the server: iptables -A INPUT -p tcp --dport 8080 -j REJECT --reject-with tcp-reset. 7) Observe RST from firewall vs RST from application."
+          }
+        },
+        {
+          "id": "net006",
+          "difficulty": "advanced",
+          "type": "open",
+          "question": "Design the complete network architecture for a small MSP client: 3 offices (HQ + 2 branches), 150 users total, VOIP phones, security cameras, corporate devices, and a guest WiFi. Cover VLANs, routing protocol, WAN connectivity, QoS for VOIP, and redundancy. Include IP addressing scheme.",
+          "idealResponse": "VLAN Design (per site): VLAN 10 - Corporate (192.168.10.0/24), VLAN 20 - VOIP (10.10.20.0/24 — dedicated for QoS marking), VLAN 30 - Cameras/IoT (10.10.30.0/24 — isolated, no internet except NVR upload), VLAN 40 - Guest (172.16.40.0/24 — internet only), VLAN 99 - Management (10.10.99.0/24 — switches, APs, restricted). Addressing: HQ = 192.168.10.0/24 users; Branch1 = 192.168.11.0/24; Branch2 = 192.168.12.0/24. WAN: Primary = MPLS or SD-WAN for site-to-site (predictable latency for VOIP). Secondary = internet-based VPN (failover). Routing: OSPF between sites over MPLS (or BGP if multi-homed ISP). Default route injected from HQ. QoS: Mark VOIP RTP traffic DSCP EF (46) at access layer when frame leaves the phone. Mark SIP signaling CS3. Apply LLQ (Low Latency Queue) on WAN interface — VOIP always serviced first. Police the priority queue to max 30% of link to prevent starvation. Redundancy: Dual WAN at HQ with failover. Spanning Tree (RSTP) for L2 redundancy. Consider stacked switches or LACP LAG for uplink redundancy. Firewall: Zone-based — WAN, LAN-Corporate, LAN-VOIP, LAN-Guest. Cameras: deny all except to NVR IP. Guest: deny RFC1918, allow WAN. VOIP: allow to VOIP provider SIP/RTP ranges only.",
+          "lab": {
+            "title": "Home Lab: Multi-VLAN Network in GNS3",
+            "steps": "1) Build in GNS3: 1 core L3 switch, 2 access switches, 1 router (WAN sim). 2) Configure 4 VLANs on all switches. 3) Configure SVIs and DHCP pools on L3 switch. 4) Simulate VOIP with iperf3 UDP traffic — set DSCP EF: iperf3 -u -b 100k -S 0xB8 (EF DSCP). 5) Add QoS config on router WAN interface — verify VOIP traffic prioritized. 6) Simulate WAN failover by shutting primary uplink."
+          }
+        },
+        {
+          "id": "net007",
+          "difficulty": "advanced",
+          "type": "mcq",
+          "question": "BGP is configured between your edge router (AS 65001) and your ISP (AS 7922). Routes are being received but not installed in the routing table. 'show ip bgp' shows the routes with '>' (best) but 'show ip route bgp' shows nothing. What is happening?",
+          "options": [
+            "BGP requires a static route to the ISP's next-hop before it can install BGP routes",
+            "The routes have a next-hop IP that is not reachable in the local routing table — BGP next-hop reachability check fails, preventing route installation even when BGP selects the best path",
+            "BGP routes require manual redistribution into the IP routing table using 'redistribute bgp' command",
+            "The AS path contains a private ASN that the router filters by default"
+          ],
+          "answer": "B",
+          "explanation": "BGP's next-hop reachability check: before installing a BGP route, the router verifies the next-hop IP is reachable via IGP or a directly connected route. If the ISP's next-hop address (e.g., 203.0.113.1) isn't in the IGP routing table, BGP considers it unreachable and doesn't install the route despite selecting it as best path in the BGP table. Common in eBGP setups where the next-hop is on a transit link not advertised by any IGP. Fix: either redistribute the connected interface into your IGP, OR add a static route covering the BGP next-hop, OR use 'next-hop-self' if this is iBGP. Verify: 'show ip bgp [prefix]' — look at 'Next hop: [IP] (inaccessible)' in the output.",
+          "lab": {
+            "title": "Home Lab: BGP Next-Hop Reachability",
+            "steps": "1) In GNS3: R1 (AS 65001) eBGP peer with R2 (AS 65002). 2) R2 advertises 10.99.0.0/24. 3) Verify route appears in 'show ip bgp' but NOT 'show ip route'. 4) Check 'show ip bgp 10.99.0.0' — find '(inaccessible)' next to next-hop. 5) Add static route to R2's interface: ip route 203.0.113.0 255.255.255.0 [R2 interface]. 6) Verify route now installs. 7) Practice: add 'neighbor R2 next-hop-self' in iBGP scenario."
+          }
+        },
+        {
+          "id": "net008",
+          "difficulty": "intermediate",
+          "type": "mcq",
+          "question": "You implement 802.1X port-based NAC on your switches. A device fails 802.1X authentication and gets placed in the VLAN 999 (Quarantine). The device is a network printer that doesn't support 802.1X EAP. What is the correct long-term solution?",
+          "options": [
+            "Exclude all printers from 802.1X by disabling it globally on printer switch ports",
+            "Configure MAC Authentication Bypass (MAB) on those ports — the switch authenticates the printer's MAC address against RADIUS before falling back from 802.1X, allowing known non-802.1X devices into the appropriate VLAN",
+            "Place printers in a separate VLAN with 802.1X disabled globally on that VLAN's switch ports",
+            "Issue 802.1X certificates to printers using your PKI — all modern printers support EAP-TLS"
+          ],
+          "answer": "B",
+          "explanation": "MAB (MAC Authentication Bypass) is the standard solution for devices that can't do EAP (printers, IP phones, IoT, cameras). The switch first attempts 802.1X EAP — if no EAP response is received (timeout), it falls back to sending the device's MAC address as the username/password to RADIUS. The RADIUS server checks the MAC against an approved list and returns the appropriate VLAN. This maintains NAC posture while accommodating non-802.1X devices. Register approved MACs in your RADIUS server (FreeRADIUS, Cisco ISE, etc.). Disabling 802.1X per-port creates an uncontrolled gap. Option C creates policy management complexity. Option D is incorrect — most printers don't natively support EAP-TLS without complex workarounds.",
+          "lab": {
+            "title": "Home Lab: 802.1X with FreeRADIUS",
+            "steps": "1) Install FreeRADIUS on Ubuntu VM. 2) Configure a Cisco switch (GNS3 or physical) for 802.1X: 'aaa new-model', 'dot1x system-auth-control'. 3) Configure a port: 'authentication port-control auto', 'mab'. 4) Add a test MAC to FreeRADIUS users file. 5) Connect a device to the port — observe RADIUS authentication in logs. 6) Test with an unknown MAC — verify quarantine VLAN assignment."
+          }
+        },
+        {
+          "id": "net009",
+          "difficulty": "foundational",
+          "type": "open",
+          "question": "Explain the difference between a hub, switch, and router. Then explain the difference between a managed switch and an unmanaged switch, and describe three real scenarios where the difference matters for an MSP deploying a client network.",
+          "idealResponse": "Hub: Layer 1 device — receives a frame and floods it out ALL ports. Every device sees every frame. Creates one large collision domain. Not used in modern networks. Switch: Layer 2 device — learns MAC addresses and builds a CAM (Content Addressable Memory) table. Forwards frames only to the port where the destination MAC lives. Each port = its own collision domain. Devices don't see each other's traffic unless in the same broadcast domain. Router: Layer 3 device — routes packets between different IP networks/subnets. Makes forwarding decisions based on IP addresses, not MAC addresses. Each interface = separate broadcast domain. Connects different networks (LAN-to-WAN, VLAN-to-VLAN with L3 routing). Unmanaged switch: plug-and-play, no configuration, no VLANs, no monitoring, no spanning tree configuration control, no port security. Managed switch: VLANs, STP configuration (RSTP/MSTP), port mirroring, SNMP monitoring, 802.1X NAC, LACP link aggregation, QoS/CoS markings, port security (MAC limiting). Scenarios where it matters: 1) VOIP deployment: managed switch required to put phones on separate VLAN and apply QoS CoS markings. 2) Security cameras: managed switch required to isolate cameras on IoT VLAN away from corporate data. 3) 802.1X NAC: managed switch required — unmanaged switches don't support RADIUS authentication. Unmanaged switches are appropriate only for small plug-and-play scenarios (home office, small conference room) where VLANs, monitoring, and access control are not requirements.",
+          "lab": {
+            "title": "Home Lab: Managed Switch Skills",
+            "steps": "1) Get a cheap managed switch (Netgear GS308E ~$40, or use GNS3). 2) Configure 3 VLANs: 10 (data), 20 (VOIP), 99 (management). 3) Set trunk ports between switches. 4) Set access ports per VLAN. 5) Enable SNMP on the switch — monitor it from a free tool like PRTG or LibreNMS. 6) Enable port mirroring (SPAN) and capture traffic with Wireshark. 7) Test LACP: if you have two uplinks, bond them with 802.3ad."
+          }
+        },
+        {
+          "id": "net010",
+          "difficulty": "advanced",
+          "type": "mcq",
+          "question": "Your client's network is experiencing intermittent connectivity drops every 30-50 seconds on multiple VLANs simultaneously. The drops correlate with Spanning Tree topology change notifications in your switch logs. What is the most likely root cause?",
+          "options": [
+            "The DHCP lease time is too short — devices are re-requesting IPs every 30-50 seconds",
+            "A rogue switch or a device sending BPDUs (Bridge Protocol Data Units) on an access port is triggering STP topology changes, causing MAC table flushes and temporary flooding/blackholing as the network reconverges",
+            "QoS is misclassifying traffic and dropping it during congestion windows",
+            "The switches have a firmware bug — upgrade to the latest firmware to resolve STP instability"
+          ],
+          "answer": "B",
+          "explanation": "STP Topology Change Notification (TCN) floods the network because every TC causes all switches to flush their MAC address tables and relearn via flooding — during this relearn period, traffic is flooded to all ports (like a hub), causing collisions, dropped frames, and temporary blackholing. Root cause: a device plugging/unplugging (laptop on an access port), a rogue switch with STP enabled connected to an access port, or a flapping uplink. Diagnose: 'show spanning-tree detail' shows the port causing topology changes. Fix: enable PortFast on all access ports (prevents STP state transitions for end devices) and BPDUGuard (shuts down any port that receives a BPDU — prevents rogue switches). Never enable PortFast on trunk/uplink ports.",
+          "lab": {
+            "title": "Home Lab: STP Topology Change Analysis",
+            "steps": "1) Build a small switched topology in GNS3 (3 switches). 2) Configure STP (PVST+). 3) Identify root bridge with 'show spanning-tree'. 4) Simulate TCN: unplug a link. 5) Watch MAC table flush: 'show mac address-table' — entries disappear. 6) Enable PortFast on an access port and connect a device — observe STP no longer processes that port. 7) Enable BPDUGuard: connect a switch to a PortFast port — observe port entering err-disabled state."
+          }
+        }
+      ]
+    },
+
+    "azure": {
+      "label": "Azure Cloud / Entra ID",
+      "icon": "☁️",
+      "color": "#c084fc",
+      "questions": [
+        {
+          "id": "az001",
+          "difficulty": "foundational",
+          "type": "mcq",
+          "question": "What is the difference between Azure RBAC roles and Entra ID (Azure AD) roles, and why can a user be a Global Administrator in Entra ID but have zero access to Azure resources?",
+          "options": [
+            "Azure RBAC and Entra ID roles are the same system with different names — Global Admin automatically grants Owner on all subscriptions",
+            "Entra ID roles control directory and M365 objects (users, groups, apps, licenses). Azure RBAC controls Azure resource access (VMs, storage, subscriptions). They are separate authorization planes — Global Admin in Entra grants no Azure resource permissions without an explicit RBAC role assignment",
+            "Global Admin automatically gets Reader access on all Azure subscriptions but not Contributor",
+            "Azure RBAC only applies to classic deployment model resources — Entra ID roles control ARM resources"
+          ],
+          "answer": "B",
+          "explanation": "Two completely separate systems: Entra ID roles (Global Admin, User Admin, Security Reader etc.) operate on the Entra ID directory — user management, app registrations, group management, M365 services. Azure RBAC (Owner, Contributor, Reader, custom roles) operates on Azure Resource Manager — subscriptions, resource groups, individual resources. A Global Admin has no Azure access by default. Exception: Global Admins can elevate themselves to User Access Administrator on the root management group via Entra ID > Properties > 'Access management for Azure resources' — this is a break-glass mechanism. For normal operations: create separate role assignments for Azure access. This separation is intentional and important for least privilege.",
+          "lab": {
+            "title": "Home Lab: Azure Free Tier IAM",
+            "steps": "1) Create Azure free account (portal.azure.com). 2) Create a test user in Entra ID. 3) Assign no Azure RBAC roles. 4) Log in as test user and navigate to Azure subscriptions — verify no access. 5) Assign 'Reader' RBAC role on the subscription. 6) Verify test user can now see resources but not modify. 7) Try assigning 'Global Reader' Entra role to the same user — verify it doesn't change Azure resource access."
+          }
+        },
+        {
+          "id": "az002",
+          "difficulty": "foundational",
+          "type": "mcq",
+          "question": "Your Azure web app needs to connect to a SQL database without storing connection strings in code or configuration files. What is the Azure-native pattern for this?",
+          "options": [
+            "Store the connection string in Azure App Configuration — it encrypts values at rest",
+            "Use Azure Key Vault to store the connection string. Assign a System-Assigned Managed Identity to the App Service. Grant the Managed Identity 'Key Vault Secrets User' RBAC on the Key Vault. The app retrieves the secret at runtime using the SDK — no credentials stored anywhere",
+            "Store the connection string in App Service Application Settings (environment variables) — they're encrypted and not visible in code",
+            "Use Azure Storage to host an encrypted config file that the app downloads at startup using a SAS token embedded in the app settings"
+          ],
+          "answer": "B",
+          "explanation": "The zero-credential pattern: Managed Identity eliminates the need for credentials entirely — the Azure platform provides a token automatically. App Service + Managed Identity + Key Vault: 1) Enable System-Assigned Managed Identity on App Service (creates a service principal in Entra with no credentials). 2) Grant that identity 'Key Vault Secrets User' RBAC (or access policy) on the Key Vault. 3) In code: use DefaultAzureCredential from Azure.Identity SDK — automatically uses Managed Identity in Azure, developer credentials locally. App settings (option C) are better than hardcoded code but still visible to anyone with Contributor access to the App Service — not the right pattern for secrets. SAS tokens are credentials too — still a secret that needs protecting.",
+          "lab": {
+            "title": "Home Lab: App Service + Key Vault + Managed Identity",
+            "steps": "1) Create Azure Key Vault, add a secret 'db-connection-string'. 2) Create an App Service (free tier). 3) Enable System-Assigned Managed Identity on App Service. 4) In Key Vault IAM: assign 'Key Vault Secrets User' to the App Service managed identity. 5) Deploy a simple .NET or Python app that retrieves the secret using DefaultAzureCredential. 6) Verify app reads secret without any credentials in code. 7) Check Key Vault audit logs — see the Managed Identity's access recorded."
+          }
+        },
+        {
+          "id": "az003",
+          "difficulty": "intermediate",
+          "type": "mcq",
+          "question": "A Conditional Access policy requires compliant devices for all cloud apps. A user with an Intune-enrolled Windows 11 laptop gets blocked. Sign-in logs show: device compliance = 'Not evaluated.' What specifically is wrong?",
+          "options": [
+            "The user needs to re-register the device with dsregcmd /join to refresh the compliance token",
+            "No Intune compliance policy has been created and assigned to this user or device group — enrollment alone doesn't make a device compliant, a compliance policy must be authored and targeted",
+            "The device is Entra-joined but not Intune-enrolled — check Entra ID > Devices for enrollment status",
+            "Conditional Access compliance check requires Entra ID P2 — the current license only includes P1"
+          ],
+          "answer": "B",
+          "explanation": "Critical distinction: 'Not evaluated' vs 'Not compliant.' Not evaluated = Intune has no compliance policy assigned to this device or user. Not compliant = a policy exists but the device failed it (missing BitLocker, outdated OS, etc.). Enrollment alone puts the device in Intune management but doesn't apply any compliance state. You must: create a Windows Compliance Policy in Intune (Devices > Compliance policies > Create), set your requirements (BitLocker, antivirus, OS version, etc.), and assign it to the group containing this user or device. After assignment, give 15-30 minutes for the policy to evaluate. Check: Intune > Devices > [device name] > Device compliance to see which policies applied and what each setting evaluated to.",
+          "lab": {
+            "title": "Home Lab: Intune Compliance + Conditional Access",
+            "steps": "1) Enroll a Windows 11 VM in Intune (Settings > Accounts > Access work or school). 2) Create a CA policy requiring compliant device for Azure portal access. 3) Try signing in — note it works or fails based on compliance state. 4) Create a Compliance Policy in Intune: require BitLocker, require antivirus. 5) Assign to test user. 6) Check compliance state in Intune portal. 7) Enable BitLocker on VM — verify device becomes compliant and CA allows access."
+          }
+        },
+        {
+          "id": "az004",
+          "difficulty": "intermediate",
+          "type": "open",
+          "question": "Explain Azure PIM (Privileged Identity Management) — what problem it solves, how Just-in-Time access works, what approval workflows look like, and how you'd configure it for Global Admin in an MSP environment.",
+          "idealResponse": "Problem PIM solves: standing privileged access. Without PIM, Global Admins are permanently GA — if compromised, attacker has immediate full tenant access. PIM makes roles 'eligible' rather than 'active': users must consciously activate their privilege for a time-limited window, with MFA re-verification and optional approval. JIT Access flow: User requests activation → specifies duration (e.g., 2 hours) → provides justification/ticket number → MFA challenge → if approval required, approvers notified via email/Teams → approver reviews and approves/denies → role activates for specified duration → automatic deactivation → audit log records full activation chain. MSP Configuration for Global Admin: 1) Navigate to Entra ID > Identity Governance > PIM > Entra ID roles > Global Administrator > Settings. 2) Set: Require MFA on activation (mandatory), Require justification (mandatory with ticket reference), Set max activation duration: 4 hours (MSP operations rarely need more), Require approval: YES — assign 2 approvers from a different team (security team lead, not the requester's manager). 3) Make all GA accounts 'eligible' (not permanently active). 4) Break-glass exception: 2 emergency GA accounts with hardware FIDO2 keys, explicitly excluded from approval requirement, with 24/7 alerting on any sign-in. 5) Alert configuration: alert on GA activation, alert on role assignment changes. 6) Access reviews: quarterly review of eligible assignments — remove any that are stale. PIM audit logs: send to Log Analytics for SIEM integration.",
+          "lab": {
+            "title": "Home Lab: PIM with M365 Developer Tenant",
+            "steps": "1) Get free M365 Developer subscription (developer.microsoft.com/microsoft-365/dev-program). 2) In your dev tenant, navigate to Entra ID > Identity Governance > PIM. 3) Enable PIM for 'Security Reader' role. 4) Make your test user 'eligible' for Security Reader. 5) Log in as test user > PIM > My roles > Activate Security Reader. 6) Observe MFA challenge and justification requirement. 7) Check PIM audit logs. 8) Configure an approval workflow for Global Admin and test the full approval flow."
+          }
+        },
+        {
+          "id": "az005",
+          "difficulty": "intermediate",
+          "type": "mcq",
+          "question": "Defender for Cloud shows your Azure subscription has a Secure Score of 34%. Which category of recommendations typically has the highest impact on improving secure score for a new subscription?",
+          "options": [
+            "Network recommendations — NSG and firewall rules are the most common gaps",
+            "Identity and access recommendations — MFA not enabled for accounts, over-privileged service principals, and missing RBAC assignments are scored heavily because identity is the primary attack vector",
+            "Data recommendations — unencrypted storage accounts and SQL databases are the most common gap",
+            "Compute recommendations — missing endpoint protection on VMs contributes most"
+          ],
+          "answer": "B",
+          "explanation": "In practice, Defender for Cloud's highest-impact recommendations for new subscriptions typically center on identity: accounts without MFA enabled, accounts with legacy authentication, service principals with client secrets (vs certificates), over-privileged custom roles, lack of PIM for privileged roles, no Conditional Access. These carry high point values because compromised identity is the attack vector for the majority of cloud breaches. After identity: compute (missing vulnerability assessment, missing EDR/Defender for Servers, missing Just-in-Time VM access), then network (public IP exposure, overly permissive NSGs), then data. Use the 'Recommendations' blade sorted by 'Max score increase' to see exactly which actions will move your score most.",
+          "lab": {
+            "title": "Home Lab: Defender for Cloud Secure Score",
+            "steps": "1) In Azure free tier, enable Defender for Cloud (free CSPM tier). 2) Review Secure Score recommendations. 3) Sort by 'Max score increase.' 4) Implement top 5 identity recommendations. 5) Wait 24 hours — observe score increase. 6) Explore 'Regulatory compliance' tab — see your resources mapped against CIS or NIST frameworks. 7) Try enabling MFA for all accounts and observe score change."
+          }
+        },
+        {
+          "id": "az006",
+          "difficulty": "advanced",
+          "type": "open",
+          "question": "Design an Azure landing zone for an MSP client migrating 3 on-premises servers to Azure. Cover: subscription structure, resource group design, hub-spoke networking, identity strategy, security controls, and cost management. The client has 50 employees, handles sensitive business data, and has an existing on-prem AD.",
+          "idealResponse": "Subscription structure: Single subscription for small client (multiple subscriptions add complexity without benefit at this scale). Management group: enroll in a management group for MSP-wide policy inheritance. Resource group design: RG-Network (VNETs, NSGs, firewall), RG-Production (VMs, app services), RG-Security (Key Vault, Log Analytics, Defender), RG-Backup (Recovery Services vault). Use tags on all resources: Environment, Owner, CostCenter, Client. Networking (Hub-Spoke): Hub VNET (10.0.0.0/16): Azure Firewall subnet (AzureFirewallSubnet/26), Bastion subnet (AzureBastionSubnet/26), Gateway subnet for VPN (/27). Spoke VNET (10.1.0.0/16): Peered to hub. VMs in spoke subnets. No public IPs on any VM — all access via Bastion (browser-based RDP/SSH) or VPN. Site-to-site VPN Gateway connects to on-prem. Identity: Azure AD Connect syncing on-prem AD to Entra ID (Password Hash Sync). Enable Seamless SSO. Entra ID P1 minimum for Conditional Access. CA policies: MFA for all users, compliant device for Azure portal access, block legacy auth. Security controls: Defender for Cloud enabled (at least free CSPM). Defender for Servers P2 on production VMs. NSGs on all subnets with least-privilege rules. JIT VM Access enabled (blocks RDP/SSH except on-demand). Key Vault for all secrets. Azure Policy: deny public IPs on VMs, require tags, require encryption. Cost management: Azure Cost Management with monthly budget alert at 80%/100%. Reserved Instances for known production VMs (1-year saves ~30%). Auto-shutdown for non-production VMs (10pm-6am). Right-size VMs using Advisor recommendations after 30 days.",
+          "lab": {
+            "title": "Home Lab: Azure Landing Zone",
+            "steps": "1) Create hub VNET (10.0.0.0/16) and spoke VNET (10.1.0.0/16). 2) Configure VNET peering. 3) Deploy Azure Bastion in hub. 4) Deploy a VM in spoke with no public IP. 5) Access VM via Bastion — observe no public IP needed. 6) Enable Defender for Cloud. 7) Create a budget alert at $50/month. 8) Review Advisor recommendations for cost optimization. 9) Enable diagnostic logs to Log Analytics workspace."
+          }
+        },
+        {
+          "id": "az007",
+          "difficulty": "advanced",
+          "type": "mcq",
+          "question": "Defender for Cloud generates an alert: 'Suspicious outbound connection to known Tor exit node' from a production web application VM. The VM runs IIS serving a public-facing application. What does this indicate and what is the correct immediate response?",
+          "options": [
+            "A developer tested the app through Tor browser — whitelist the IP range and document",
+            "The web application VM is likely compromised — a threat actor gained code execution via web app exploitation and is establishing C2 through Tor to evade detection. Immediately isolate the VM, preserve disk snapshot, collect memory dump, and begin forensic investigation",
+            "Azure flagged a false positive — production web servers commonly connect to CDN nodes that share Tor IP ranges",
+            "The IIS application pool identity has excessive permissions — restrict it to NetworkService and the connections will stop"
+          ],
+          "answer": "B",
+          "explanation": "Production web servers have zero legitimate reason to initiate outbound connections to Tor exit nodes. This pattern indicates: 1) Web application exploitation (SQLi, RCE, path traversal, unpatched CVE) allowing attacker code execution. 2) Attacker installed a backdoor/webshell routing C2 traffic through Tor for anonymity. 3) Possibly cryptocurrency mining malware using Tor for pool connections. Immediate response: 1) Isolate VM — add NSG rule blocking all outbound OR use Defender's 'Isolate machine.' 2) Take VM disk snapshot immediately (forensic preservation before any changes). 3) If possible, take memory dump of running VM. 4) Review IIS access logs for exploitation patterns (SQLi payloads, path traversal, unusual POST requests). 5) Check for webshells: search for .asp, .aspx, .php files recently modified. 6) Notify CISO. 7) Determine if data was accessed/exfiltrated before containment.",
+          "lab": {
+            "title": "Home Lab: Defender for Cloud Alert Simulation",
+            "steps": "1) Enable Defender for Servers P2 on a VM. 2) Run a simulated threat: download EICAR test file, run a test exploitation tool. 3) Observe Defender alerts in the portal. 4) Practice the 'Investigate in Log Analytics' button — write KQL queries to trace the alert. 5) Practice VM isolation via Defender (isolates network without shutting down). 6) Review the 'Threat intelligence' linked to alerts."
+          }
+        },
+        {
+          "id": "az008",
+          "difficulty": "intermediate",
+          "type": "mcq",
+          "question": "You need to restrict an Azure Function App to only accept traffic from a specific partner company's IP range. The Function App uses an HTTP trigger with a public endpoint. What is the simplest correct approach?",
+          "options": [
+            "Add the IP range to the Function App's CORS settings — CORS restricts which origins can call the API",
+            "Configure Access Restrictions in the Function App's Networking settings — add an Allow rule for the partner IP range and a Deny rule for all others (the built-in IP restriction feature)",
+            "Deploy an API Management gateway in front of the Function App and configure IP filtering at the APIM layer",
+            "Require an API key in the request header — function-level auth keys are IP-aware and will reject calls from unauthorized IPs"
+          ],
+          "answer": "B",
+          "explanation": "Access Restrictions in App Service / Function App Networking settings is the simplest correct answer — directly filters by source IP at the platform level before the request reaches your code. CORS (option A) is enforced by the browser but easily bypassed by non-browser clients (curl, scripts, Postman) — it's not a security control. API Management (option C) works but is architecturally complex and costly for a simple IP restriction. Function keys (option D) are authentication tokens, not IP-based controls. Access Restrictions: Portal > Function App > Networking > Access Restrictions > Add rule: Type=IP range, Action=Allow, IP=[partner range]. Add a final rule: Action=Deny, IP=Any. Rules are evaluated in priority order.",
+          "lab": {
+            "title": "Home Lab: Function App Access Restrictions",
+            "steps": "1) Create an Azure Function App (Consumption plan, free tier). 2) Create a simple HTTP trigger function. 3) Test it works from your browser. 4) Add an Access Restriction: Deny all (IP: 0.0.0.0/0). 5) Verify it blocks your browser. 6) Add your home IP as Allow rule (check your IP at whatismyip.com). 7) Verify access restored. 8) Use curl from a different network (phone hotspot) to confirm blocking."
+          }
+        }
+      ]
+    },
+
+    "secops": {
+      "label": "Security Operations",
+      "icon": "🛡️",
+      "color": "#ff3c6e",
+      "questions": [
+        {
+          "id": "so001",
+          "difficulty": "foundational",
+          "type": "mcq",
+          "question": "EDR alert: winword.exe spawned powershell.exe, which made an outbound connection to 185.220.101.x:443. The process tree shows powershell.exe downloading a file and executing it from %TEMP%. What MITRE ATT&CK techniques are present and what is your immediate action?",
+          "options": [
+            "T1059 Command Scripting, T1105 Ingress Tool Transfer — run a virus scan on the %TEMP% file before taking any action",
+            "T1566.001 Spearphishing Attachment, T1059.001 PowerShell, T1105 Ingress Tool Transfer, T1204.002 User Execution — isolate the host via EDR immediately, preserve memory dump, do NOT reboot",
+            "T1078 Valid Accounts — the user's account was compromised externally; reset their password and close the alert",
+            "T1055 Process Injection — the PowerShell process injected into Word; kill powershell.exe and the threat is contained"
+          ],
+          "answer": "B",
+          "explanation": "Full kill chain analysis: T1566.001 Spearphishing Attachment (delivery — malicious Office doc via email) → T1204.002 User Execution (user opened the doc) → T1059.001 PowerShell (macro spawned PowerShell) → T1105 Ingress Tool Transfer (PowerShell downloaded payload from 185.220.101.x — a known Tor exit node range) → T1204.002/T1059.001 (payload executed from %TEMP%). Immediate actions: 1) Isolate host via EDR one-click isolation. 2) DO NOT reboot — payload may be in memory only, rebooting destroys forensic evidence and may trigger wipers. 3) Take memory dump (EDR capture or ProcDump before isolation cuts network). 4) Hash the %TEMP% file, check VirusTotal via a separate system. 5) Check if other hosts contacted the same C2 IP in the past 72 hours.",
+          "lab": {
+            "title": "Home Lab: EDR in Detection Mode with Wazuh",
+            "steps": "1) Install Wazuh Manager and deploy agent to a Windows VM. 2) Install Sysmon with SwiftOnSecurity config. 3) Simulate the attack chain: create a batch file in %TEMP% that runs a benign PowerShell command. 4) Execute it via a VBS script (simulating macro). 5) Observe Sysmon Event ID 1 (process creation) in Wazuh. 6) Write a custom Wazuh rule detecting Word→PowerShell process chains. 7) Practice the 'investigate' workflow from alert to host artifact."
+          }
+        },
+        {
+          "id": "so002",
+          "difficulty": "intermediate",
+          "type": "mcq",
+          "question": "SIEM shows 200+ authentication failures across 47 different user accounts from IP 91.108.4.x in 8 minutes, then the activity stops abruptly. No accounts were successfully compromised. What attack and what does the abrupt stop indicate?",
+          "options": [
+            "Credential stuffing — attacker exhausted their credential list and moved on",
+            "Password spray — attacker deliberately spread authentication attempts across many accounts to stay below per-account lockout thresholds. Abrupt stop indicates they hit a detection boundary or alert threshold and backed off to avoid lockout cascade",
+            "Brute force — attacker switched to a different target after running out of common passwords",
+            "Reconnaissance — attacker was mapping which accounts exist based on authentication error codes"
+          ],
+          "answer": "B",
+          "explanation": "Password spray signature: many accounts, few attempts per account (stays below lockout of 3-5), consistent timing. The abrupt stop is sophisticated tradecraft — the attacker monitors for SIEM alerts or lockout events and pauses when they hit a threshold. 91.108.4.x is a Telegram infrastructure IP range — sometimes used as proxy. Hunting follow-up: 1) Check if ANY of those 47 accounts subsequently had successful logins from unusual locations in the next 48 hours (attacker may already have valid creds from a previous spray). 2) Review the specific password that was attempted — often a seasonal password (Company2024!, Summer24!) sprayed company-wide. 3) Block the source IP. SIEM detection rule: alert when single IP attempts auth against >10 unique accounts within 5 minutes.",
+          "lab": {
+            "title": "Home Lab: Password Spray Detection in Wazuh",
+            "steps": "1) Set up Wazuh with Windows AD agent. 2) Use a test script to simulate spray: attempt 3 logins to each of 10 test accounts from a Linux VM. 3) Observe Windows Security Event 4625 (failed logon) — note LogonType and source IP. 4) Write Wazuh rule: composite rule counting unique TargetUserName values from same source IP within 5-minute window. 5) Tune threshold and verify alert fires. 6) Practice blocking source IP via firewall automation from Wazuh active response."
+          }
+        },
+        {
+          "id": "so003",
+          "difficulty": "intermediate",
+          "type": "open",
+          "question": "You're first responder to an active M365 phishing incident. A user entered their credentials on a fake Microsoft login page 15 minutes ago. Walk through your complete response — every step in order — prioritizing speed and evidence preservation.",
+          "idealResponse": "Minute 0-2 (Stop the bleeding): 1) Revoke all active sessions for the compromised account: Entra ID > User > Revoke sessions (invalidates all current tokens). 2) Simultaneously reset the account password to a random strong password (attacker loses access if they try again). Do both steps essentially simultaneously — session revocation without password reset allows re-auth with old password. Minute 2-5 (Verify MFA integrity): 3) Check MFA registration methods for the account — attackers register their own authenticator app within 2-3 minutes of compromise. Entra ID > User > Authentication methods. Remove any unrecognized phone numbers or authenticator apps. 4) Check if any new Conditional Access exclusions were added (attackers sometimes add themselves to exclusion groups). Minute 5-15 (Assess damage): 5) Review Sign-in logs — what was accessed in the 15-minute window? SharePoint? Teams? Email? Note source IPs and device IDs. 6) Check Inbox Rules — attackers create forwarding rules to exfiltrate email silently. Exchange Admin Center or Get-InboxRule -Mailbox user@domain.com. Delete any rules not created by the user. 7) Check for OAuth app consent grants during the session — attackers use consent phishing to maintain persistence even after password reset. Entra ID > Enterprise Applications > filter by consent date. 8) Search email for the phishing URL across all users using Threat Explorer — identify who else received it. Minute 15-30 (Contain and Notify): 9) Block the phishing domain at your email gateway. 10) Contact the user by phone (NOT email) — tell them what happened and what to do. 11) If PHI/PII was in accessible email — assess breach notification requirements. 12) Document everything with timestamps for incident report.",
+          "lab": {
+            "title": "Home Lab: M365 Phishing IR Simulation",
+            "steps": "1) In your M365 dev tenant, create a test user. 2) Using the admin account, compromise the test user (simulate attacker access). 3) Create a forwarding inbox rule on the mailbox. 4) Practice the full IR workflow: revoke sessions, check auth methods, find the inbox rule, remove it. 5) Use Threat Explorer (requires Defender for Office P2) to search for a test phishing email. 6) Practice with Microsoft's Attack Simulator (M365 security portal) to send simulated phishing to your test users."
+          }
+        },
+        {
+          "id": "so004",
+          "difficulty": "intermediate",
+          "type": "mcq",
+          "question": "You find a process 'svchost32.exe' running from C:\\Users\\Public\\svchost32.exe with established connection to 45.33.32.156:443. Legitimate svchost.exe only runs from C:\\Windows\\System32\\. What MITRE technique is this and what do you do first?",
+          "options": [
+            "T1036 Masquerading — run a full AV scan on the binary before taking any other action",
+            "T1036.005 Match Legitimate Name or Location — hash the binary, check VirusTotal from a separate system, then isolate the host via EDR before doing anything else on the machine",
+            "T1574 Hijack Execution Flow — the binary hijacked svchost.exe's registry entry; restore the registry key to fix it",
+            "T1055 Process Injection — the binary injected into svchost; killing the process resolves the issue"
+          ],
+          "answer": "B",
+          "explanation": "T1036.005 (Match Legitimate Name or Location): attacker names malware identically to a legitimate system process to blend in with normal process listings. C:\\Users\\Public\\ is world-writable — no admin rights needed to place files there, making it a common malware staging path. Response sequence matters: 1) Hash first (Get-FileHash C:\\Users\\Public\\svchost32.exe -Algorithm SHA256) and check VirusTotal from a SEPARATE system — don't browse from the infected machine. 2) Isolate via EDR — cuts network connection to 45.33.32.156 (this IP is Shodan scanner infrastructure, but in this scenario treat as C2). 3) Find persistence: check Task Scheduler, HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run, Services. 4) Check what the process accessed — files, network connections, registry. 5) Check for lateral movement — same binary hash on other endpoints.",
+          "lab": {
+            "title": "Home Lab: Malware Hunting with Autoruns + Process Monitor",
+            "steps": "1) Download Sysinternals Suite. 2) Copy cmd.exe to C:\\Users\\Public\\svchost32.exe (safe simulation). 3) Open Autoruns — observe nothing listed (it's not persistent yet). 4) Add to Run key: reg add HKCU\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run /v svchost32 /d C:\\Users\\Public\\svchost32.exe. 5) Reopen Autoruns — observe the suspicious entry highlighted (VirusTotal integration shows 0/70 for cmd.exe — expected, but the path stands out). 6) Use Process Monitor to filter by path 'svchost32.exe' — observe all file/registry activity. 7) Clean up: remove the registry key."
+          }
+        },
+        {
+          "id": "so005",
+          "difficulty": "advanced",
+          "type": "mcq",
+          "question": "A Defender for Endpoint alert fires: 'Credential dumping via LSASS memory access.' The offending process is a legitimately signed EDR binary from your security vendor. What are the two possible explanations and how do you determine which is correct?",
+          "options": [
+            "It's always a false positive when a signed vendor binary triggers credential dumping alerts — add it to the exclusion list",
+            "Either the EDR vendor's binary legitimately accesses LSASS for detection (some do), OR the binary was supply-chain compromised or the signing certificate was abused. Verify the binary hash against vendor's published known-good hash, check if this fires on ALL endpoints (vendor behavior) or isolated systems (targeted attack), and contact the vendor's security team directly",
+            "The LSASS protection policy is too strict — disable Credential Guard on affected machines",
+            "The alert indicates the EDR binary needs updating — patch it to the latest version"
+          ],
+          "answer": "B",
+          "explanation": "This is exactly the SolarWinds/3CX scenario — supply chain attacks use legitimate signed binaries. Two scenarios require different responses: Scenario A (legitimate vendor behavior): some AV/EDR vendors read LSASS for detection purposes. Evidence: alert fires on ALL enrolled endpoints uniformly, vendor acknowledges this is expected behavior, binary hash matches vendor's published hash list. Response: add vendor-verified exclusion with documentation. Scenario B (supply chain compromise): alert fires on some endpoints, hash doesn't match vendor's known-good, vendor denies expected behavior, other anomalous behavior from the binary. Response: isolate affected systems, contact vendor emergency security line, escalate to CISO. Never assume a signed binary is safe — SolarWinds SUNBURST was signed by a valid SolarWinds certificate. Verification steps: 1) Hash every instance of the binary across your estate. 2) Compare to vendor's published hash. 3) Check certificate revocation status. 4) Contact vendor through a verified channel (NOT from the potentially compromised system).",
+          "lab": {
+            "title": "Home Lab: LSASS Protection and Detection",
+            "steps": "1) Enable LSASS protection: Computer Config > Admin Templates > System > Local Security Authority > 'Configure LSASS to run as a protected process'. 2) Attempt to dump LSASS with ProcDump (admin test): procdump -ma lsass.exe — observe access denied. 3) Install Sysmon and check Event ID 10 (ProcessAccess) filtering for TargetImage containing lsass.exe. 4) Review which processes legitimately access LSASS in your environment. 5) Write Wazuh rule alerting on lsass.exe access from non-system processes."
+          }
+        },
+        {
+          "id": "so006",
+          "difficulty": "advanced",
+          "type": "open",
+          "question": "You receive a ransomware alert at 2am — a file server is actively encrypting documents. It has been running for approximately 8 minutes. Walk through your complete incident response from the moment you get the call through post-incident documentation.",
+          "idealResponse": "Minutes 0-3 (Containment — stop the bleeding): 1) Isolate the file server via EDR isolation (network-level quarantine without shutting down — preserves running state, logs, and possible in-memory decryption keys). If no EDR, physically unplug the network cable — do NOT shut down. 2) Identify what shares were being encrypted — check file server event logs for the ransomware process and modified paths. 3) Alert CISO/management immediately — this is a business-critical incident. 4) Begin parallel investigation — who else might be affected? Check EDR console for similar process signatures on other machines. Minutes 3-10 (Evidence Preservation): 5) Take a memory dump of the isolated server (ProcDump, WinPmem, or EDR's capture). Memory may contain: encryption keys (useful for decryptors), attacker tooling, C2 configuration. 6) Take a VM snapshot if virtualized, or image a drive if physical. This is your forensic evidence — preserve it before any remediation. 7) Export all available log files: Security, System, Application Event logs. EDR telemetry. NetFlow/firewall logs from the past 48 hours. Minutes 10-30 (Investigation): 8) Identify the ransomware family: file extension of encrypted files, ransom note content, submit sample to ID Ransomware (nomoreransom.org) — some families have free decryptors. 9) Identify patient zero: trace process tree backward. How did the ransomware execute? Phishing email? RDP brute force? Exploit? Lateral movement from another compromised host? 10) Map the blast radius: which shares were affected? How much data? Was any data exfiltrated before encryption started? (Modern ransomware groups exfiltrate first — check outbound data volume spikes in firewall logs 24-48 hours prior). Hour 1-4 (Recovery): 11) Identify last known good backup — verify integrity before restoring (check backup hasn't been encrypted too). 12) Patch the attack vector before restoring to production. 13) Reset all credentials that could have been accessed from the compromised server. 14) Restore from backup. Post-incident: 15) Full incident report: timeline, MITRE ATT&CK mapping, root cause, containment actions, recovery steps. 16) Assess legal notification obligations: if customer data was involved, state breach laws and HIPAA may require notification within 72 hours (GDPR) or 60 days (HIPAA). 17) Conduct tabletop exercise post-incident to improve the response.",
+          "lab": {
+            "title": "Home Lab: Ransomware IR Simulation",
+            "steps": "1) Download RanSim (KnowBe4's safe ransomware simulator) on a test VM. 2) Run it and observe simulated encryption activity. 3) Practice: isolate the VM in your hypervisor (disconnect network adapter). 4) Take a snapshot. 5) Export Windows event logs. 6) Use WinPmem to take a memory dump. 7) Practice identifying encryption processes in Process Monitor. 8) Practice verifying backup integrity by restoring a test file from backup. 9) Write up a mock incident report."
+          }
+        },
+        {
+          "id": "so007",
+          "difficulty": "advanced",
+          "type": "mcq",
+          "question": "Your SIEM shows a user authenticated from Chicago at 9:02am, then successfully authenticated with valid MFA from London at 9:11am — a 9-minute travel gap. What is this detection called, and what does 'valid MFA' in the second login tell you specifically about the attack method?",
+          "options": [
+            "Geographic anomaly — VPN usage is likely, contact the user via Teams to verify and document",
+            "Impossible Travel — a human cannot physically travel between those cities in 9 minutes. 'Valid MFA' specifically indicates either AiTM (Adversary-in-the-Middle) phishing that captured a real session token, MFA fatigue (user approved a push notification), or SIM swap. These bypass MFA entirely — simple MFA reset won't fully remediate if AiTM was used",
+            "Credential spray — two different users share these credentials; audit for shared accounts",
+            "Time zone misconfiguration — verify the SIEM is normalizing timestamps to UTC before treating this as a real alert"
+          ],
+          "answer": "B",
+          "explanation": "Impossible Travel with successful MFA is a high-confidence indicator of advanced credential compromise. The MFA success is the critical detail — it rules out simple password theft and points to: 1) AiTM (Adversary-in-the-Middle) phishing via tools like Evilginx2, Modlishka, or Microsoft's Caffeine framework — the attacker sits as a proxy, captures the real-time session token (not the password/MFA code itself), and uses the token directly, bypassing MFA entirely. 2) MFA push fatigue — user approved a notification thinking it was a mistake. 3) SIM swap — attacker controls the phone number. Remediation that MUST happen: 1) Revoke all sessions (token revocation, not just password reset — with AiTM, the attacker has a live token). 2) Investigate what the London session accessed. 3) Review MFA registrations for unauthorized authenticators. 4) Long-term fix: move to phishing-resistant MFA (FIDO2/passkeys) — AiTM cannot capture hardware-bound authentication. Entra ID Protection natively detects impossible travel and can auto-block with risk-based CA.",
+          "lab": {
+            "title": "Home Lab: Entra ID Protection Risk Policies",
+            "steps": "1) In M365 dev tenant, enable Entra ID Protection. 2) Review risk detection types (impossible travel, unfamiliar sign-in properties, anonymous IP). 3) Create a User Risk policy: if user risk is HIGH, require password change. 4) Create a Sign-in Risk policy: if sign-in risk is MEDIUM+, require MFA. 5) Test: use a VPN to simulate sign-in from different location. 6) Check the Risk Detections log. 7) Practice remediating risky users: admin remediation vs. self-remediation."
+          }
+        },
+        {
+          "id": "so008",
+          "difficulty": "foundational",
+          "type": "mcq",
+          "question": "You receive an alert that an employee's laptop has a file matching a known malware hash. The employee is currently working remotely. What is the correct isolation approach and why is shutting down the machine wrong?",
+          "options": [
+            "Shut down the machine immediately to prevent the malware from spreading further via network connections",
+            "Remotely isolate the machine via EDR (network isolation that keeps the endpoint reachable by the EDR agent but blocks all other network traffic) — shutdown destroys volatile memory evidence including in-memory keys, C2 connection state, and running process details that are critical for forensic investigation",
+            "Ask the employee to delete the file and restart their machine — remote employees are lower risk since they're not on the corporate network",
+            "Disconnect the VPN connection to sever the corporate network connection — this is sufficient containment"
+          ],
+          "answer": "B",
+          "explanation": "EDR isolation is the correct tool: it cuts all network connections from the endpoint except the EDR management channel, so you maintain remote forensic capability while preventing lateral movement or C2 communication. Why NOT shut down: 1) RAM is lost — any malware that's entirely memory-resident vanishes. 2) Encryption keys held in memory (ransomware) are lost — sometimes decryptors exist if you can extract the key from memory. 3) Running process context, network socket state, and injected code disappear. 4) File system caches and prefetch data that could indicate execution history may change on next boot. Why NOT just disconnect VPN: the machine still has internet access and can continue C2 communication. The malware doesn't need VPN to reach its C2 server. Isolation must be at the OS/network adapter level, not just VPN.",
+          "lab": {
+            "title": "Home Lab: EDR Isolation with Wazuh Active Response",
+            "steps": "1) Configure Wazuh active response to block network traffic on alert. 2) In Wazuh: ossec.conf configure <active-response> with firewall-drop command. 3) Trigger a high-severity alert (EICAR test file detection). 4) Observe active response running: iptables rule added blocking all traffic except Wazuh manager. 5) Verify agent remains reachable by Wazuh despite network isolation. 6) Practice removing the isolation and verifying normal connectivity restored."
+          }
+        }
+      ]
+    },
+
+    "scripting": {
+      "label": "Scripting / Automation",
+      "icon": "💻",
+      "color": "#00e5ff",
+      "questions": [
+        {
+          "id": "sc001",
+          "difficulty": "foundational",
+          "type": "mcq",
+          "question": "What are the two bugs in this PowerShell script, and what does it actually output?",
+          "code": "$users = Get-ADUser -Filter * -Properties Department\n$users | Where-Object { $_.Department -eq 'IT' }\nforeach ($user in $users) {\n    Write-Output $user.Name\n}",
+          "options": [
+            "No bugs — it outputs the names of all IT department users in alphabetical order",
+            "Bug 1: The Where-Object result is piped to console (discarded) instead of assigned to a variable — foreach still iterates all users. Bug 2: Get-ADUser -Filter * is inefficient and memory-intensive on large directories — use -Filter {Department -eq 'IT'} for server-side filtering",
+            "Bug 1: Write-Output should be Write-Host to display to console. Bug 2: The filter uses single quotes which aren't supported in AD filters",
+            "Bug 1: Missing -ErrorAction SilentlyContinue. Bug 2: Department property isn't returned by default and needs -Properties Department"
+          ],
+          "answer": "B",
+          "explanation": "Two distinct bugs: 1) The Where-Object result goes to the pipeline/console and is discarded — the $users variable is unchanged. The foreach loop runs on the original unfiltered $users. Fix: $itUsers = $users | Where-Object { $_.Department -eq 'IT' } then foreach ($user in $itUsers). 2) Get-ADUser -Filter * fetches every user object in AD before PowerShell filters — on a 10,000-user directory, this is thousands of objects in memory. Server-side filtering: Get-ADUser -Filter {Department -eq 'IT'} -Properties Department lets AD do the filtering before objects are returned. Combined fix: Get-ADUser -Filter {Department -eq 'IT'} -Properties Department | Select-Object Name | ForEach-Object { Write-Output $_.Name }",
+          "lab": {
+            "title": "Home Lab: PowerShell AD Scripting",
+            "steps": "1) Create 20 test AD users across 3 departments (IT, HR, Finance) using New-ADUser in a loop. 2) Write a script with the bug from this question. 3) Run it and observe all users output (not just IT). 4) Fix both bugs and verify only IT users output. 5) Add -Measure-Object to compare execution time between server-side and client-side filtering. 6) Add Export-Csv -NoTypeInformation output to save results."
+          }
+        },
+        {
+          "id": "sc002",
+          "difficulty": "intermediate",
+          "type": "open",
+          "question": "Write a PowerShell script that inventories all AD computers, tests reachability via ping, and for online machines retrieves: OS version, last boot time, and whether Windows Defender is enabled. Export results to CSV. Include proper error handling.",
+          "idealResponse": "```powershell\n$results = [System.Collections.Generic.List[PSObject]]::new()\n$computers = Get-ADComputer -Filter * -Properties OperatingSystem | Select-Object Name, OperatingSystem\n\nforeach ($computer in $computers) {\n    $entry = [PSCustomObject]@{\n        ComputerName    = $computer.Name\n        OS              = $computer.OperatingSystem\n        Online          = $false\n        LastBoot        = 'N/A'\n        DefenderEnabled = 'N/A'\n        Error           = ''\n    }\n\n    $online = Test-Connection -ComputerName $computer.Name -Count 1 -Quiet -ErrorAction SilentlyContinue\n    $entry.Online = $online\n\n    if ($online) {\n        try {\n            $os = Get-CimInstance -ClassName Win32_OperatingSystem -ComputerName $computer.Name -ErrorAction Stop\n            $entry.LastBoot = $os.LastBootUpTime\n\n            $defender = Get-CimInstance -Namespace 'ROOT\\Microsoft\\Windows\\Defender' -ClassName MSFT_MpComputerStatus -ComputerName $computer.Name -ErrorAction Stop\n            $entry.DefenderEnabled = $defender.AntivirusEnabled\n        }\n        catch {\n            $entry.Error = $_.Exception.Message\n        }\n    }\n\n    $results.Add($entry)\n}\n\n$timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'\n$results | Export-Csv -Path \"C:\\Reports\\Inventory-$timestamp.csv\" -NoTypeInformation\nWrite-Output \"Report saved: $($results.Count) computers inventoried.\"\n```\nKey points: Generic List is faster than += for large datasets. CimInstance (WMI successor) is preferred over WMI. Separate try/catch isolates failures per-machine. Timestamped filename prevents overwrites. -ErrorAction Stop is required for try/catch to work on cmdlet errors.",
+          "lab": {
+            "title": "Home Lab: Automated Inventory Script",
+            "steps": "1) Run this script against your lab domain (even 3-4 VMs gives realistic output). 2) Deliberately shut down one VM before running — observe the Online=False row. 3) Disable Windows Defender on one VM — verify DefenderEnabled=False captured. 4) Add -Parallel to the foreach using ForEach-Object -Parallel (PS 7+) and compare execution time. 5) Schedule the script via Task Scheduler to run weekly and email the CSV using Send-MailMessage."
+          }
+        },
+        {
+          "id": "sc003",
+          "difficulty": "intermediate",
+          "type": "mcq",
+          "question": "You need to query all M365 users via PowerShell. The AzureAD module gives a deprecation warning. What is the current Microsoft-supported approach and what scope is required for read-only user enumeration?",
+          "options": [
+            "Use Get-MsolUser from the MSOnline module — it's the current replacement for AzureAD",
+            "Use the Microsoft.Graph PowerShell SDK: Install-Module Microsoft.Graph, then Connect-MgGraph -Scopes 'User.Read.All', then Get-MgUser -All. MSOnline and AzureAD are both deprecated",
+            "Use Invoke-RestMethod directly against the Graph API with a manually constructed bearer token — the SDK is not officially supported",
+            "Use Exchange Online PowerShell's Get-Mailbox -ResultSize Unlimited — it returns all M365 users with mailboxes"
+          ],
+          "answer": "B",
+          "explanation": "Both MSOnline and AzureAD modules are deprecated as of March 30, 2024 — Microsoft stopped feature development and will eventually retire them. The Microsoft.Graph SDK is the official replacement. Key workflow: 1) Install-Module Microsoft.Graph (or just Microsoft.Graph.Users for lighter install). 2) Connect-MgGraph -Scopes 'User.Read.All' — for delegated auth (interactive sign-in). For automation/app auth: Connect-MgGraph -ClientId -TenantId -CertificateThumbprint. 3) Get-MgUser -All (paginates automatically). 4) Select specific properties: Get-MgUser -All -Property DisplayName,UserPrincipalName,AccountEnabled,SignInActivity. Get-Mailbox (option D) only returns mailbox-enabled users and doesn't cover cloud-only users without Exchange licenses.",
+          "lab": {
+            "title": "Home Lab: Microsoft Graph PowerShell",
+            "steps": "1) Install-Module Microsoft.Graph. 2) Connect-MgGraph -Scopes 'User.Read.All','Group.Read.All'. 3) Get-MgUser -All | Select DisplayName, UserPrincipalName, AccountEnabled. 4) Get-MgGroup -All | Select DisplayName, MembershipRule. 5) Practice: find all disabled users: Get-MgUser -All -Filter 'accountEnabled eq false'. 6) Find users with no MFA: requires Get-MgReportAuthenticationMethodUserRegistrationDetail (Reports.Read.All scope). 7) Export findings to CSV."
+          }
+        },
+        {
+          "id": "sc004",
+          "difficulty": "intermediate",
+          "type": "open",
+          "question": "Write a Bash script that monitors a directory for new files using inotifywait, calculates SHA256 of each new file, logs to a file, and sends an alert to a Discord webhook. Explain how to run it as a persistent systemd service.",
+          "idealResponse": "```bash\n#!/bin/bash\n# file-monitor.sh\nWATCH_DIR=\"/opt/monitored\"\nLOG_FILE=\"/var/log/file-monitor.log\"\nWEBHOOK_URL=\"https://discord.com/api/webhooks/YOUR_ID/YOUR_TOKEN\"\n\nmkdir -p \"$WATCH_DIR\"\n\ninotifywait -m -e close_write,moved_to --format '%f' \"$WATCH_DIR\" 2>/dev/null | \\\nwhile read -r FILENAME; do\n    FILEPATH=\"$WATCH_DIR/$FILENAME\"\n    [ -f \"$FILEPATH\" ] || continue\n\n    HASH=$(sha256sum \"$FILEPATH\" | awk '{print $1}')\n    TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')\n\n    echo \"$TIMESTAMP | NEW FILE | $FILENAME | SHA256: $HASH\" >> \"$LOG_FILE\"\n\n    PAYLOAD=$(jq -n --arg msg \"🚨 **File Monitor Alert**\\n**File:** $FILENAME\\n**SHA256:** $HASH\\n**Time:** $TIMESTAMP\" '{content: $msg}')\n    curl -s -X POST -H 'Content-Type: application/json' -d \"$PAYLOAD\" \"$WEBHOOK_URL\" > /dev/null\ndone\n```\n\nsystemd service file (/etc/systemd/system/file-monitor.service):\n```ini\n[Unit]\nDescription=File Monitor Service\nAfter=network.target\n\n[Service]\nExecStart=/opt/file-monitor.sh\nRestart=always\nRestartSec=5\nUser=root\nStandardOutput=journal\nStandardError=journal\n\n[Install]\nWantedBy=multi-user.target\n```\nEnable: systemctl daemon-reload && systemctl enable --now file-monitor. Check: systemctl status file-monitor, journalctl -u file-monitor -f. Key: -e close_write fires AFTER the write completes (not on create, which fires before data is written). The [ -f ] check skips directory events. jq for JSON construction is safer than printf for special characters.",
+          "lab": {
+            "title": "Home Lab: File Integrity Monitoring",
+            "steps": "1) Install inotify-tools and jq on Ubuntu: apt install inotify-tools jq. 2) Create the script and service file. 3) Create a Discord server and webhook (Server Settings > Integrations > Webhooks). 4) Start the service. 5) Drop a test file in the monitored directory. 6) Verify: log entry created, Discord message received. 7) Check journalctl for service output. 8) Test persistence: reboot the VM and verify the service auto-starts."
+          }
+        },
+        {
+          "id": "sc005",
+          "difficulty": "advanced",
+          "type": "mcq",
+          "question": "You're automating user offboarding in PowerShell. What is the critical security ordering issue if you: 1) Disable AD account, 2) Wait for Entra sync, 3) Revoke M365 sessions?",
+          "options": [
+            "There is no issue — disabling AD automatically and immediately revokes all M365 sessions",
+            "Azure AD Connect syncs on a 30-minute cycle — between AD disable and sync completion, the user still has fully valid Entra ID tokens and can access all M365 services. The correct approach: revoke M365 sessions via Microsoft Graph FIRST (Revoke-MgUserSignInSession), simultaneously reset the cloud password, then disable the AD account",
+            "AD disable should come last — M365 data should be backed up before disabling any authentication",
+            "The issue is that group membership removal should happen before account disable to prevent Kerberos token issues"
+          ],
+          "answer": "B",
+          "explanation": "Critical gap: Azure AD Connect's default sync interval is 30 minutes. A terminated user (or an attacker with their credentials) has a 30-minute window after AD account disable where Entra ID tokens remain valid — they can still access email, SharePoint, Teams, OneDrive, and any M365-connected app. The fix: immediately call Revoke-MgUserSignInSession -UserId [UPN] via Microsoft Graph — this invalidates all current access tokens in real-time, independent of sync cycle. Also reset-MgUserPassword to invalidate password-based refresh tokens. Correct offboarding sequence: 1) Revoke-MgUserSignInSession (immediate, cloud-side). 2) Reset password (AD + cloud). 3) Disable AD account. 4) Remove from security groups. 5) Hide from GAL (Set-Mailbox -HiddenFromAddressListsEnabled $true). 6) Set OOO message. 7) Forward mailbox to manager if needed. 8) Move to Disabled OU. 9) Document all actions with timestamps.",
+          "lab": {
+            "title": "Home Lab: Automated Offboarding Script",
+            "steps": "1) Write a full offboarding script combining AD commands (Disable-ADAccount, Remove-ADGroupMember) with Graph API calls (Revoke-MgUserSignInSession, Update-MgUser). 2) Test on a lab user — run the script and verify each step. 3) Add logging: each action writes to a timestamped log file. 4) Test the sync gap: disable AD account, immediately check if the user can still authenticate to M365 (they can for up to 30 min without session revocation). 5) Compare with Graph revocation — verify immediate effect."
+          }
+        },
+        {
+          "id": "sc006",
+          "difficulty": "advanced",
+          "type": "open",
+          "question": "Write a Python script that queries the Microsoft Defender for Endpoint API to retrieve all high-severity alerts from the past 24 hours, enriches each alert with VirusTotal reputation data for any file hashes found, and outputs a formatted JSON report. Describe the authentication approach.",
+          "idealResponse": "```python\nimport requests\nimport json\nfrom datetime import datetime, timedelta, timezone\nimport time\n\n# --- Auth: App Registration with client credentials flow ---\n# Register app in Entra ID with WindowsDefenderATP application permissions:\n# Alert.Read.All\nTENANT_ID = 'YOUR_TENANT_ID'\nCLIENT_ID = 'YOUR_APP_ID'\nCLIENT_SECRET = 'YOUR_SECRET'  # Use Key Vault in production\nVT_API_KEY = 'YOUR_VT_KEY'  # Free tier: 500 req/day\n\ndef get_mde_token():\n    url = f'https://login.microsoftonline.com/{TENANT_ID}/oauth2/v2.0/token'\n    data = {\n        'grant_type': 'client_credentials',\n        'client_id': CLIENT_ID,\n        'client_secret': CLIENT_SECRET,\n        'scope': 'https://api.securitycenter.microsoft.com/.default'\n    }\n    r = requests.post(url, data=data)\n    r.raise_for_status()\n    return r.json()['access_token']\n\ndef get_high_alerts(token):\n    since = (datetime.now(timezone.utc) - timedelta(hours=24)).strftime('%Y-%m-%dT%H:%M:%SZ')\n    url = 'https://api.securitycenter.microsoft.com/api/alerts'\n    params = {\n        '$filter': f\"severity eq 'High' and createdTime ge {since}\",\n        '$orderby': 'createdTime desc',\n        '$top': 100\n    }\n    headers = {'Authorization': f'Bearer {token}'}\n    r = requests.get(url, headers=headers, params=params)\n    r.raise_for_status()\n    return r.json().get('value', [])\n\ndef vt_lookup(sha256, retries=2):\n    for attempt in range(retries):\n        url = f'https://www.virustotal.com/api/v3/files/{sha256}'\n        headers = {'x-apikey': VT_API_KEY}\n        r = requests.get(url, headers=headers)\n        if r.status_code == 200:\n            stats = r.json()['data']['attributes']['last_analysis_stats']\n            return {'malicious': stats.get('malicious', 0), 'suspicious': stats.get('suspicious', 0), 'total': sum(stats.values())}\n        elif r.status_code == 429:  # Rate limit\n            time.sleep(15 * (attempt + 1))\n        else:\n            return {'error': f'HTTP {r.status_code}'}\n    return {'error': 'Rate limited'}\n\ntoken = get_mde_token()\nalerts = get_high_alerts(token)\nreport = []\n\nfor alert in alerts:\n    enriched = {'alert_id': alert.get('id'), 'title': alert.get('title'), 'severity': alert.get('severity'),\n                'device': alert.get('computerDnsName'), 'created': alert.get('createdTime'),\n                'mitre': alert.get('mitreTechniques', []), 'vt_enrichment': []}\n    for evidence in alert.get('evidence', []):\n        if evidence.get('sha256'):\n            vt_data = vt_lookup(evidence['sha256'])\n            enriched['vt_enrichment'].append({'sha256': evidence['sha256'], 'filename': evidence.get('fileName'), 'virustotal': vt_data})\n            time.sleep(1)  # VT free tier rate limiting\n    report.append(enriched)\n\ntimestamp = datetime.now().strftime('%Y%m%d-%H%M%S')\nwith open(f'mde_report_{timestamp}.json', 'w') as f:\n    json.dump(report, f, indent=2)\nprint(f'Report: {len(report)} high alerts, {timestamp}')\n```\nProduction improvements: store secrets in Key Vault (use azure-identity + azure-keyvault-secrets), use certificate auth instead of client secret, add retry logic with exponential backoff, send report via email using Graph API.",
+          "lab": {
+            "title": "Home Lab: API Integration & Security Automation",
+            "steps": "1) Get a free VirusTotal API key (virustotal.com). 2) Register an app in your M365 dev tenant Entra ID. 3) Grant WindowsDefenderATP Alert.Read.All permission. 4) Run the script against your dev tenant (even with no real alerts, test auth flow). 5) Test VT lookup with a known malware SHA256 (search any threat intel report for sample hashes). 6) Modify the script to send the JSON report via Microsoft Graph email API. 7) Schedule it with cron or Task Scheduler."
+          }
+        }
+      ]
+    },
+
+    "emailsec": {
+      "label": "Email Security",
+      "icon": "📨",
+      "color": "#b8ff57",
+      "questions": [
+        {
+          "id": "em001",
+          "difficulty": "foundational",
+          "type": "mcq",
+          "question": "A client's SPF record is: v=spf1 include:spf.protection.outlook.com include:sendgrid.net include:mailchimp.com include:zendesk.com include:salesforce.com include:smtp2.vendor.net ~all. What critical problem does this create?",
+          "options": [
+            "The record is missing DKIM and DMARC — SPF alone is insufficient for email authentication",
+            "The ~all (softfail) should be -all (hardfail) to properly reject unauthorized senders",
+            "The record exceeds the 10 DNS lookup limit — each include: is a lookup and many expand recursively, causing SPF PermError which causes legitimate email to fail authentication at receiving servers",
+            "You cannot mix include: mechanisms with ip4: mechanisms in the same SPF record"
+          ],
+          "answer": "C",
+          "explanation": "RFC 7208 limits SPF to 10 DNS lookups (include, a, mx, ptr, redirect each count). This record has 6 includes before any recursive expansion — many providers (SendGrid, Salesforce) expand to 3-4 additional lookups each. When the total exceeds 10, the SPF evaluation returns PermError, which receivers interpret as a hard failure for legitimate mail. Fix: SPF flattening — use tools like dmarcly.com, valimail.com, or MXToolbox SPF analyzer to resolve all includes to their actual IP ranges and replace the include mechanisms with ip4: ranges. This removes lookup requirements. Alternatively, use a managed SPF service that handles flattening dynamically. ~all vs -all is important but secondary to fixing the lookup limit.",
+          "lab": {
+            "title": "Home Lab: SPF Testing & Flattening",
+            "steps": "1) Register a cheap test domain (~$1 at Namecheap). 2) Add an intentionally broken SPF record with 11+ lookups. 3) Test with mxtoolbox.com/spf — observe 'PermError: too many DNS lookups'. 4) Use SPF flattening tool to resolve all includes to IPs. 5) Replace with flattened record. 6) Send a test email from a known authorized IP — verify SPF pass in headers. 7) Send from an unauthorized IP — verify SPF fail."
+          }
+        },
+        {
+          "id": "em002",
+          "difficulty": "foundational",
+          "type": "open",
+          "question": "Explain the difference between SPF, DKIM, and DMARC — what each checks, where each is configured in DNS, and what happens to email if only SPF is configured but DKIM and DMARC are absent.",
+          "idealResponse": "SPF (Sender Policy Framework): DNS TXT record at the root domain (v=spf1). Lists authorized sending IP addresses. Checked by receivers against the envelope-from (Return-Path) domain — NOT the visible From: header. Pass = the sending IP is in the list. Alignment check: the envelope-from domain must match the Header From domain for DMARC SPF alignment. DKIM (DomainKeys Identified Mail): DNS TXT record at selector._domainkey.domain.com (e.g., google._domainkey.company.com). The sending mail server signs the email with a private key — the hash covers specific headers and body. Receivers verify using the public key in DNS. Survives email forwarding (signature travels with the email) unlike SPF which breaks on forward. DMARC (Domain-based Message Authentication, Reporting & Conformance): DNS TXT record at _dmarc.domain.com. Requires either SPF OR DKIM to pass AND be aligned with the Header From domain. Policy tells receivers what to do on failure: p=none (monitor, no action), p=quarantine (spam folder), p=reject (bounce). Also configures reporting: rua= for aggregate XML reports, ruf= for per-message forensic reports. Without DKIM or DMARC: SPF alone means the receiving server verifies the sending IP but: 1) Many receivers won't take action on SPF failures without DMARC enforcement. 2) Your From: domain can be freely spoofed — attacker sends from any IP with a different Return-Path domain that passes SPF for their domain, while showing your domain in From:. 3) No reporting to tell you your domain is being spoofed. DMARC p=reject is the only complete protection against domain spoofing.",
+          "lab": {
+            "title": "Home Lab: Full Email Auth Setup",
+            "steps": "1) Set up a test domain. 2) Configure MX pointing to your mail server. 3) Add SPF record. 4) Generate DKIM keypair: opendkim-genkey -s mail -d yourdomain.com. 5) Publish public key as DNS TXT record. 6) Configure private key in Postfix+OpenDKIM. 7) Add DMARC TXT record: v=DMARC1; p=none; rua=mailto:dmarc@yourdomain.com. 8) Send test email to mail-tester.com — verify 10/10 score. 9) Check your rua inbox after 24 hours for your first DMARC aggregate report."
+          }
+        },
+        {
+          "id": "em003",
+          "difficulty": "intermediate",
+          "type": "mcq",
+          "question": "You pull the raw headers of a suspicious email claiming to be from ceo@yourcompany.com. The Authentication-Results header shows: spf=fail (sender IP 45.33.32.156 is not authorized); dkim=none; dmarc=fail action=none. Your DMARC policy is p=none. What happened and why was it delivered?",
+          "options": [
+            "SPF and DKIM failing means DMARC automatically rejects the email regardless of policy",
+            "The email is a spoofed message — SPF failed (sending IP not authorized), no DKIM signature was present, and DMARC failed. It was delivered because your DMARC policy is p=none (monitoring only) — p=none tells receivers to take no action on DMARC failures, just report them. Moving to p=quarantine or p=reject is required to enforce rejection",
+            "The email was delivered because DMARC only applies to messages that pass SPF — since SPF failed, DMARC doesn't evaluate",
+            "DMARC failure means the email was quarantined — check the user's spam folder, it shouldn't have reached the inbox"
+          ],
+          "answer": "B",
+          "explanation": "Exact diagnosis of what happened: 1) SPF fail: the sending IP (45.33.32.156) is not in the SPF record for the domain in the Return-Path header. 2) DKIM none: no DKIM signature was applied — the attacker didn't have signing keys. 3) DMARC fail: neither SPF alignment nor DKIM alignment succeeded. 4) Delivered because p=none: DMARC with p=none is monitoring-only — receivers record the failure in aggregate reports sent to your rua= address but take NO action on the email itself. Many organizations stay at p=none for months and wonder why they're still spoofed. The path forward: review DMARC aggregate reports (dmarcian, mxtoolbox DMARC analyzer) to ensure all legitimate sending sources pass, then escalate: p=quarantine (pct=10 for gradual rollout) → p=quarantine (pct=100) → p=reject. Set sp=reject to protect subdomains.",
+          "lab": {
+            "title": "Home Lab: DMARC Reporting & Analysis",
+            "steps": "1) Set DMARC with rua=mailto:dmarc-reports@yourdomain.com. 2) Send legitimate emails and spoofed test emails (use swaks tool: swaks --from spoof@yourdomain.com --to test@external.com --server yourtestserver). 3) Wait 24 hours for aggregate reports. 4) Download and parse the XML reports: they're gzipped XML sent as email attachments. 5) Upload to dmarcian.com free analyzer. 6) Change p=none to p=quarantine and repeat — observe spoofed emails now going to spam."
+          }
+        },
+        {
+          "id": "em004",
+          "difficulty": "intermediate",
+          "type": "mcq",
+          "question": "Your client's CRM system (Salesforce) sends emails from noreply@clientdomain.com but DMARC fails on those messages. Checking headers shows the DKIM signature is signed by salesforce.com, not clientdomain.com. SPF shows the Return-Path is bounce.salesforce.com, not clientdomain.com. What is causing the DMARC failure and what is the fix?",
+          "options": [
+            "Add Salesforce IPs to the client's SPF record — this will fix SPF alignment and satisfy DMARC",
+            "DMARC requires alignment between the authentication domain and the Header From domain. SPF is aligned against Return-Path (bounce.salesforce.com, not clientdomain.com — misaligned). DKIM is signed by salesforce.com (not clientdomain.com — misaligned). Neither aligns. Fix: configure Custom Domain Authentication in Salesforce to sign outgoing email with clientdomain.com DKIM keys — DKIM alignment satisfies DMARC",
+            "Configure Salesforce to use clientdomain.com as the Return-Path — this fixes SPF alignment and satisfies DMARC without any DKIM changes",
+            "Add a DMARC override rule for Salesforce sending IPs — DMARC supports IP-based exceptions for third-party senders"
+          ],
+          "answer": "B",
+          "explanation": "DMARC alignment requires: either SPF passes AND the Return-Path domain matches the Header From domain (clientdomain.com), OR DKIM signature passes AND the d= tag matches the Header From domain. Salesforce's default sending: Return-Path = bounce.salesforce.com (SPF misaligned), DKIM signed by salesforce.com (misaligned). Adding client IPs to SPF (option A) helps SPF pass for the envelope sender but doesn't fix the alignment mismatch — the Return-Path is still bounce.salesforce.com, not clientdomain.com. The correct fix: Salesforce Custom Domain Authentication — add CNAME records to clientdomain.com's DNS that Salesforce provides. This allows Salesforce to sign outgoing email with a DKIM key where d=clientdomain.com — DKIM aligned, DMARC passes. This is also more robust than SPF alignment because it survives forwarding. DMARC has no IP-based override mechanism.",
+          "lab": {
+            "title": "Home Lab: Third-Party DKIM Alignment",
+            "steps": "1) Use Mailchimp's free tier — send a campaign from your test domain. 2) Before configuring DKIM, check headers — observe DKIM signed by mailchimp.com, not your domain. 3) In Mailchimp: Audience > Settings > Verified Domains > Authenticate. 4) Add the provided CNAME records to your domain DNS. 5) Send another campaign. 6) Check headers: DKIM should now show d=yourdomain.com. 7) Verify DMARC passes in Authentication-Results."
+          }
+        },
+        {
+          "id": "em005",
+          "difficulty": "advanced",
+          "type": "mcq",
+          "question": "You have DMARC p=reject configured for your domain. A security researcher reports they successfully delivered an email appearing to be from ceo@yourcompany.com to external recipients. Your DMARC is working correctly. How is this possible? Identify the most likely attack vector.",
+          "options": [
+            "This is impossible — p=reject means all spoofed emails are permanently rejected by all receiving servers",
+            "The researcher likely used a lookalike domain (c0mpany.com, company.co, cornpany.com) — DMARC only protects the exact domain configured, not visually similar domains. Attackers register lookalikes specifically to bypass DMARC",
+            "The receiving mail servers don't support DMARC — many legacy servers ignore DMARC reject policies",
+            "DMARC reject only applies to the MX domain, not all external mail servers"
+          ],
+          "answer": "B",
+          "explanation": "p=reject on yourcompany.com is airtight for that exact domain — but it creates displacement to lookalike domains. Attackers register: c0mpany.com (zero instead of o), company.co, cornpany.com (rn looks like m), yourcompany-llc.com, company-support.com, etc. These domains have no DMARC policy from your company — or the attacker sets up their own DMARC p=none. The From: display name shows 'CEO Name' and users don't look at the email address carefully. Detection/prevention: 1) Monitor newly registered domains similar to yours (DomainTools, Bolster platform, DMARC analyzer lookalike detection). 2) Register the most obvious lookalikes yourself. 3) User awareness training: always check the actual email address, not just display name. 4) Configure Defender for Office 365 anti-phishing policies with impersonation protection for your executives. Other legitimate DMARC bypass: email forwarding (breaks SPF, some implementations skip DMARC on forwarded mail), legacy receiving servers that ignore DMARC, subdomain spoofing (add sp=reject to DMARC record).",
+          "lab": {
+            "title": "Home Lab: Lookalike Domain Detection",
+            "steps": "1) Use dnstwist tool (apt install dnstwist or pip install dnstwist). 2) Run: dnstwist --registered yourcompany.com — see all registered lookalike domains. 3) Check which ones have MX records (capable of sending email): dnstwist --registered -m yourcompany.com. 4) For your test domain: send an email from a lookalike you own — observe it bypasses DMARC completely. 5) Configure Defender for Office 365 (if M365 dev tenant): Anti-phishing policy > Impersonation Protection > add your domain and key executives."
+          }
+        },
+        {
+          "id": "em006",
+          "difficulty": "intermediate",
+          "type": "open",
+          "question": "A user forwards you a suspicious email. Walk through exactly how you would analyze the raw email headers to determine if it is spoofed, identify the actual sending server, and determine what authentication mechanisms passed or failed.",
+          "idealResponse": "Step 1 — Get raw headers: In Outlook: File > Properties > Internet Headers. In Gmail: Three dots > Show Original. In OWA: Three dots > View Message Details. Step 2 — Read the Received chain (bottom to top): The BOTTOM Received header is the originating server — where the email actually started. Work upward through each hop to your mail server. The bottom hop reveals the true sending server's hostname and IP. Check if that IP belongs to the claimed sender's infrastructure (reverse DNS lookup, WHOIS). Step 3 — Check Return-Path: The Return-Path (envelope-from) is the bounce address. Compare it to the Header From: domain. If they differ (e.g., From: ceo@yourcompany.com but Return-Path: attacker@otherdomain.com), this is a red flag — the SPF check applies to Return-Path, not From:. Step 4 — Read Authentication-Results header: This is added by YOUR receiving mail server and shows: spf=pass|fail|neutral (did the sending IP match the Return-Path domain's SPF?), dkim=pass|fail|none (was there a valid signature?), dmarc=pass|fail (did alignment succeed?). If Authentication-Results is absent — it was likely added between hops and you're not seeing the authoritative one. Step 5 — Check DKIM-Signature header: d= tag shows which domain signed. s= is the selector. If d= doesn't match the From: domain — DKIM misaligned. Step 6 — Check Message-ID: should be @the-sending-server-domain. If it's @anotherdomain.com it's weak evidence of spoofing (not conclusive). Step 7 — Cross-reference IPs: Run source IP through MXToolbox Blacklist Check, VirusTotal, and AbuseIPDB. Check if IP is a Tor exit node or known spam infrastructure. Step 8 — Conclusion: Spoofed if: Authentication-Results shows spf=fail, dmarc=fail, Received chain shows unknown IP, Return-Path doesn't match From:.",
+          "lab": {
+            "title": "Home Lab: Header Analysis Practice",
+            "steps": "1) Use MXToolbox Email Header Analyzer with real email headers. 2) Sign up for PhishTank or ANY.RUN — analyze submitted phishing samples' headers. 3) Send yourself a test email through swaks: swaks --from fake@microsoft.com --to you@yourdomain.com --server yourmailserver. 4) Analyze the headers — observe SPF failure. 5) Use Google Admin Toolbox (toolbox.googleapps.com/apps/messageheader) to visualize hop timing. 6) Practice identifying the true sending IP and running it through AbuseIPDB."
+          }
+        }
+      ]
+    },
+
+    "architecture": {
+      "label": "Security Architecture",
+      "icon": "🏗️",
+      "color": "#ffaa00",
+      "questions": [
+        {
+          "id": "ar001",
+          "difficulty": "foundational",
+          "type": "mcq",
+          "question": "A client asks whether to implement VPN or Zero Trust Network Access (ZTNA) for 80 remote employees who use only M365 and Salesforce — no on-premises resources. What is the correct recommendation and why?",
+          "options": [
+            "Traditional VPN — it's more mature and easier to support for a team of 80",
+            "ZTNA implemented via Conditional Access — the client has no on-premises network to VPN into. VPN provides network-level access which is irrelevant for SaaS. Conditional Access (verify identity + device compliance + risk level) provides application-level access control for M365 and Salesforce without the attack surface and complexity of VPN infrastructure",
+            "Both — VPN for administrative access and ZTNA for user access",
+            "Neither — M365 and Salesforce have built-in security that makes additional access controls unnecessary"
+          ],
+          "answer": "B",
+          "explanation": "VPN grants 'inside the network' access — but for a pure SaaS organization, there is no corporate network to be inside. A VPN server would just proxy internet traffic with no security benefit for SaaS access, while adding infrastructure to maintain, credentials to protect, and a potential network pivot point if compromised. The correct architecture: Conditional Access as the ZTNA control plane. Policy: require MFA + compliant device (Intune-managed, BitLocker, updated OS) for M365 access. Apply similar controls via Salesforce's SSO integration. For executives: named location policies, session controls (limit download on unmanaged devices). Microsoft explicitly recommends NOT routing M365 traffic through VPN (it degrades performance and provides no security benefit for cloud services). VPN remains appropriate when on-premises resources exist.",
+          "lab": {
+            "title": "Home Lab: Conditional Access as ZTNA",
+            "steps": "1) In M365 dev tenant, create a CA policy: require MFA for all M365 apps. 2) Create a second policy: require compliant device for SharePoint access. 3) Enroll a VM in Intune. 4) Test access from enrolled vs non-enrolled device. 5) Add a Named Location (your home IP). 6) Create policy: block access from outside Named Location for admin accounts. 7) Test from a VPN connection to simulate different location."
+          }
+        },
+        {
+          "id": "ar002",
+          "difficulty": "intermediate",
+          "type": "mcq",
+          "question": "During a NIST CSF assessment for a healthcare client, you find: EDR on all endpoints, no asset inventory, backups tested quarterly, no formal IR plan, HIPAA risk assessment 3 years old, staff phishing training once per year. What are the top 3 gaps in priority order and why?",
+          "options": [
+            "1) More frequent phishing training 2) Monthly backup testing 3) Updated risk assessment",
+            "1) No asset inventory (Identify function — you cannot protect, detect, or respond to assets you don't know exist) 2) No formal IR plan (Respond function — any incident will be chaotic; HIPAA 45 CFR 164.308(a)(6) explicitly requires a written response plan) 3) Outdated risk assessment (3 years violates HIPAA's requirement for regular reassessment, especially after significant operational changes)",
+            "1) Updated risk assessment 2) No IR plan 3) Monthly backup testing",
+            "1) No IR plan 2) Phishing training frequency 3) No asset inventory"
+          ],
+          "answer": "B",
+          "explanation": "NIST CSF function priority reflects a dependency chain — Identify enables everything else: you can't protect, detect, or respond to assets you don't know exist. Asset inventory is foundational. No asset inventory means: unknown devices could have unpatched vulnerabilities, EDR may not be covering all endpoints (you don't know what you don't know), backup scope may be missing critical systems. IR Plan: HIPAA specifically requires written IR procedures (§164.308(a)(6)). Without it, any incident — ransomware, breach — becomes reactive chaos that dramatically extends recovery time and increases regulatory exposure. Also required: testing the IR plan annually. Risk assessment: HIPAA requires 'periodic' reassessment and specifically after significant environmental or operational changes. 3 years likely covers multiple changes (COVID remote work, new software, personnel changes). Phishing training annually is suboptimal but there's EDR backstop. Quarterly backup testing is reasonable for most SMBs.",
+          "lab": {
+            "title": "Home Lab: NIST CSF Gap Assessment Template",
+            "steps": "1) Download the NIST CSF Excel assessment template (nist.gov/cyberframework). 2) Fill it out for your home lab environment — rate each subcategory 1-5. 3) Identify your Current Profile vs Target Profile gaps. 4) Create a simple asset inventory: use your RMM/AD to export all computers, manually add network devices. 5) Write a one-page IR plan for your home lab — what would you do if a VM was compromised? 6) Document your results and create a prioritized remediation roadmap."
+          }
+        },
+        {
+          "id": "ar003",
+          "difficulty": "intermediate",
+          "type": "open",
+          "question": "Design a 90-day security remediation roadmap for a client that was just breached. Current state: flat network, no MFA, shared admin credentials, no logging, no EDR, on-premises Exchange 2013, Windows Server 2012 R2. Budget is limited. Prioritize by highest risk reduction per dollar spent.",
+          "idealResponse": "Week 1-2 (Stop the bleeding — free/near-free, highest impact): 1) Emergency MFA deployment for ALL users — start with Microsoft Authenticator (free with any M365 subscription) or Duo Free (up to 10 users). MFA blocks 99.9% of automated credential attacks. 2) Rotate ALL credentials — assume everything was exfiltrated. Every service account, admin account, user account. Use a password manager (Bitwarden Teams ~$3/user). 3) Separate admin accounts — dedicated accounts for admin tasks, standard accounts for daily work. Never browse email as a Domain Admin. 4) Disable unused/guest/service accounts — quick audit: Get-ADUser -Filter {Enabled -eq $true -and LastLogonDate -lt (Get-Date).AddDays(-90)}. 5) Enable Windows Defender (free) on all endpoints with real-time protection — it's already there and costs nothing to activate. Month 1 (Visibility — you can't secure what you can't see): 6) Enable Windows Event Logging — Security log (4624/4625/4648/4688), PowerShell logging. Deploy to central collector via Windows Event Forwarding (free, built-in). 7) Deploy Wazuh free SIEM — 30-minute setup, installs agents on all Windows machines, immediate visibility into authentication events and process execution. 8) Enable audit policy GPO: account logon, privilege use, process creation. Month 2 (Architecture): 9) Network segmentation — minimum: separate server VLAN from workstation VLAN with a firewall rule. Even basic VLAN separation contains lateral movement. 10) Patch/replace critical systems — Exchange 2013 reached EOL October 2023 (no security patches). Windows Server 2012 R2 EOL October 2023. These are the highest-risk systems. Plan migration to Exchange Online (lower cost than new on-prem) and Server 2022. Apply Extended Security Updates as interim measure. 11) Incident Response plan — write a one-page runbook: who gets called, what gets isolated, evidence preservation steps. 12) Backup strategy — verify current backups are complete and offsite/offline. Test a restore. Month 3 (Maturity): 13) EDR deployment — SentinelOne, Crowdstrike, or Microsoft Defender for Endpoint. Most critical investment after MFA. 14) Email security — Defender for Office 365 Plan 1 (~$2/user/month) or Google Workspace equivalent. 15) Security awareness training — KnowBe4 or Proofpoint. 16) Penetration test (external) — validate remediation and find remaining gaps. Cost priority order: Free first (MDE, Wazuh, Windows Defender, Event Logging), then high-ROI paid tools (MFA platform, EDR, email security).",
+          "lab": {
+            "title": "Home Lab: Build Your Security Stack on a Budget",
+            "steps": "1) Install Wazuh (free SIEM/XDR) — wazuh.com/install. 2) Deploy agents to all your lab VMs. 3) Enable Sysmon on Windows VMs. 4) Enable Windows audit policy via GPO. 5) Create a Wazuh dashboard for: failed logins, new local accounts, scheduled task creation, PowerShell execution. 6) Simulate an attack: create a local admin account, observe the Wazuh alert. 7) Practice the full detection-to-response workflow."
+          }
+        },
+        {
+          "id": "ar004",
+          "difficulty": "intermediate",
+          "type": "mcq",
+          "question": "What is the difference between authentication and authorization? Give an example of a security failure that demonstrates confusion between the two.",
+          "options": [
+            "Authentication verifies what you can do; authorization verifies who you are — they are inverses of the same concept",
+            "Authentication verifies identity (who you are — username/password/MFA). Authorization verifies permission (what you're allowed to do — RBAC/ACLs). Classic failure: an API validates the JWT token (authentication passes) but never checks if the user's role permits the requested action — any authenticated user can access admin endpoints (OWASP A01 Broken Access Control)",
+            "Authentication is for interactive users; authorization is for service accounts and APIs",
+            "They are synonymous in modern OAuth 2.0 — the access token serves both authentication and authorization purposes"
+          ],
+          "answer": "B",
+          "explanation": "Authentication = 'prove who you are.' Authorization = 'verify you're allowed to do this.' Both must be implemented correctly and independently. Classic failures: 1) IDOR (Insecure Direct Object Reference): user is authenticated but /api/invoice/1234 has no authorization check — user changes to /api/invoice/9999 and accesses another company's invoice. 2) Privilege escalation: JWT token contains role=user, client modifies to role=admin, server trusts the token claims without server-side verification. 3) Missing function-level access control: the UI hides admin buttons but the API endpoints work for any authenticated user — developer assumed UI = security. Architecture principle: authentication happens at the identity layer (IdP, MFA). Authorization must be enforced server-side on every request, cannot be delegated to the client, and must be re-verified even for authenticated sessions. Never trust client-supplied role or permission data without server-side verification.",
+          "lab": {
+            "title": "Home Lab: Build a Vulnerable API to Understand AuthZ Failures",
+            "steps": "1) Use DVWA (Damn Vulnerable Web Application) or WebGoat in a Docker container. 2) Practice IDOR: find a user ID in a URL and increment it to access other users' data. 3) Practice broken access control: find an admin endpoint accessible by a regular user. 4) Use Burp Suite Community (free) to intercept and modify requests. 5) Fix the vulnerable code to add proper authorization checks. 6) Practice the difference between fixing authentication (MFA) vs authorization (server-side role verification)."
+          }
+        },
+        {
+          "id": "ar005",
+          "difficulty": "advanced",
+          "type": "open",
+          "question": "Explain CIS Controls v8 Implementation Groups — what IG1, IG2, and IG3 are, what the first 6 controls are, and how you would use CIS Controls to build a maturity roadmap for a 100-person SMB professional services firm.",
+          "idealResponse": "CIS Controls v8 has 18 controls organized into Implementation Groups based on organizational risk profile and resources: IG1 (56 safeguards): Essential cyber hygiene — every organization regardless of size should implement these. They address the most prevalent attack patterns. No dedicated security staff assumed. IG2 (74 additional safeguards): For organizations with dedicated IT staff handling more sensitive data. Adds more sophisticated controls that require security expertise. IG3 (23 additional safeguards): For mature security programs facing sophisticated targeted threats. Requires dedicated security teams and advanced capabilities. First 6 CIS Controls (and key IG1 safeguards): 1) Inventory and Control of Enterprise Assets: know every device on your network. IG1: active discovery tool, DHCP logging, address unauthorized assets. 2) Inventory and Control of Software Assets: authorized software list, remove unauthorized software. IG1: maintain inventory, address unauthorized software. 3) Data Protection: data classification, secure disposal, encryption. IG1: establish a data management process, configure data-at-rest encryption. 4) Secure Configuration of Enterprise Assets and Software: use secure baselines, not default configs. IG1: CIS Benchmarks for OS, browsers, applications. 5) Account Management: track and control accounts, disable inactive accounts within 45 days. IG1: inventory of all accounts, disable unauthorized accounts. 6) Access Control Management: least privilege, just-in-time access. IG1: establish documented process for account access rights. Roadmap for 100-person SMB: Quarter 1 (IG1 Foundation): Asset inventory (Lansweeper, RMM tool), disable all accounts inactive >45 days, implement password manager, enable MFA (Controls 5/6), configure CIS Benchmark Level 1 on all Windows machines (Control 4), deploy EDR (Control 10 — malware defenses). Quarter 2 (IG1 Completion): Data classification (Control 3), audit log collection and retention (Control 8), email/web browser protections (Control 9), vulnerability scanning (Control 7). Quarter 3-4 (Begin IG2): Penetration testing (Control 18), incident response plan (Control 17), security awareness training (Control 14), network monitoring (Control 13). Measuring maturity: use CIS RAM (Risk Assessment Method) to score current vs target state. Report progress quarterly to leadership with specific control scores and trend lines.",
+          "lab": {
+            "title": "Home Lab: CIS Benchmark Hardening",
+            "steps": "1) Download CIS Benchmark for Windows 10/11 (free PDF from cisecurity.org). 2) Download CIS-CAT Lite (free scanner). 3) Run CIS-CAT against a Windows VM — observe current score (likely 40-60%). 4) Apply Level 1 hardening recommendations from the benchmark. 5) Re-run scan — observe score improvement. 6) Document which controls you applied and which require exceptions. 7) Practice applying CIS Benchmark for a web browser (Chrome hardening GPO settings)."
+          }
+        },
+        {
+          "id": "ar006",
+          "difficulty": "advanced",
+          "type": "mcq",
+          "question": "You're implementing microsegmentation for a client with 200 on-premises devices. You want to enforce that HR workstations can only reach the HR file server and payroll application, and cannot reach IT infrastructure or other departments. What is the most scalable enforcement approach?",
+          "options": [
+            "Configure host-based Windows Firewall rules via GPO on each HR workstation to block all traffic except the specific destinations",
+            "Place HR in a dedicated VLAN and configure ACLs on the L3 switch to permit only HR workstation subnet to HR server IPs on specific ports — deny all other cross-VLAN traffic from HR VLAN",
+            "Deploy a dedicated firewall between the HR VLAN and all other VLANs for stateful inspection",
+            "Both A and B are correct — host-based firewall (defense in depth) combined with network-level VLAN ACLs (perimeter control) provides layered microsegmentation. A alone fails if a workstation is compromised and firewall rules are modified; B alone fails if a device is plugged into the wrong VLAN port"
+          ],
+          "answer": "D",
+          "explanation": "Defense in depth is the correct architectural principle. Each layer compensates for the other's weaknesses: VLAN + ACL (network layer): enforced by the switch regardless of host configuration. An attacker who compromises a workstation cannot modify switch ACLs (requires switch admin access). Limits which subnets can communicate. Efficient — one ACL rule controls many hosts. Host-based firewall (host layer): provides granular per-host control. Survives network misconfiguration (plugged into wrong VLAN). Provides visibility into local process-level traffic. Together: if an HR workstation is compromised, the host-based firewall limits what processes can communicate even to allowed destinations. The VLAN ACL prevents any traffic reaching IT infrastructure even if the host firewall is disabled. Implementation: 1) Start with 2-4 week traffic monitoring before enforcing (document actual traffic flows). 2) Deploy VLAN ACLs first (coarser, safer). 3) Add host-based rules via GPO after traffic patterns are understood. 4) Consider a microsegmentation platform (Illumio, Guardicore) for larger scale — provides visualization of traffic flows before enforcement.",
+          "lab": {
+            "title": "Home Lab: Microsegmentation with VLANs + Windows Firewall GPO",
+            "steps": "1) Create VLAN 10 (HR simulation) and VLAN 20 (IT simulation) in your lab. 2) Place VMs in respective VLANs. 3) Add VLAN ACL: permit HR VLAN to reach only specific server IP on port 445. 4) Deny HR VLAN to IT VLAN. 5) Deploy GPO: Computer Config > Windows Firewall > create outbound rules allowing only the specific server IPs and ports. 6) Test: from HR VM, verify you can reach the file server but not IT VMs. 7) Simulate compromise: disable Windows Firewall on HR VM — verify VLAN ACL still blocks IT VLAN access."
+          }
+        }
+      ]
+    },
+
+    "m365": {
+      "label": "M365 / Exchange / Entra",
+      "icon": "📧",
+      "color": "#ffaa00",
+      "questions": [
+        {
+          "id": "m365001",
+          "difficulty": "foundational",
+          "type": "mcq",
+          "question": "A user can't access their mailbox in Outlook or OWA. Their AD account is active and synced to Entra ID. Other users are fine. What do you check first?",
+          "options": [
+            "Run a mailbox repair request in Exchange Admin Center",
+            "Reset the user's password and clear their Outlook profile",
+            "Check if the Exchange Online license is assigned — a missing or removed license immediately disables mailbox access and is the most common cause of sudden mailbox unavailability",
+            "Check if the user's AD account is in the correct OU for Exchange sync"
+          ],
+          "answer": "C",
+          "explanation": "In M365, the Exchange Online license must be assigned for mailbox access. If removed (accidental license reassignment, license pack changed, user moved to a different group that lost the license), the mailbox becomes inaccessible within minutes. After 30 days of no license the mailbox enters a soft-delete state. Check: Entra ID > User > Licenses. Also verify via EXO PowerShell: Get-Mailbox -Identity user@domain.com — if it returns nothing, the mailbox may be soft-deleted. Check Get-Mailbox -SoftDeletedMailbox. Check the M365 Service Health dashboard for any active Exchange incidents before spending time on individual troubleshooting.",
+          "lab": {
+            "title": "Home Lab: M365 License Management",
+            "steps": "1) In your M365 dev tenant, create a test user with an E5 license. 2) Access their mailbox in OWA — confirm it works. 3) Remove the E5 license from the user. 4) Immediately try OWA — observe the error. 5) Reassign the license. 6) Verify mailbox access restores. 7) Practice: Get-Mailbox in EXO PowerShell to check mailbox status."
+          }
+        },
+        {
+          "id": "m365002",
+          "difficulty": "intermediate",
+          "type": "mcq",
+          "question": "You need to block all legacy authentication (IMAP, POP3, basic SMTP auth) tenant-wide but must exempt one service account for a legacy application that requires SMTP auth. What is the correct Entra ID approach?",
+          "options": [
+            "Disable Security Defaults — Security Defaults blocks legacy auth and you need to manage exceptions",
+            "Create two CA policies: Policy 1 blocks legacy auth for All Users; Policy 2 allows legacy auth for the service account — in CA, allow overrides block",
+            "Create one CA policy blocking legacy auth for All Users, with the service account account excluded from that specific policy — Conditional Access has no 'allow overrides block' logic; block always wins when two policies both apply",
+            "Use Exchange Online PowerShell to disable SMTP AUTH per-mailbox for all users, leaving only the service account mailbox with SMTP AUTH enabled"
+          ],
+          "answer": "C",
+          "explanation": "Critical CA misconception: there is NO 'allow wins over block' logic in Conditional Access. When two policies both apply to a user, the most restrictive grant controls determine access. Creating an 'allow legacy auth' policy does NOT override a 'block legacy auth' policy — if both apply to the same user, the block wins. The correct approach: single policy with exclusion. Create one policy: Conditions > Client apps: select legacy auth clients. Grant: Block access. Assign: All Users. Exclude: the service account in the Users/Groups exclusion. The exclusion means the policy simply doesn't apply to the excluded account. Option D (per-mailbox SMTP AUTH disable) works for SMTP specifically but doesn't cover IMAP/POP3 and requires managing individual mailbox settings rather than policy.",
+          "lab": {
+            "title": "Home Lab: Blocking Legacy Auth",
+            "steps": "1) In M365 dev tenant, create a CA policy blocking legacy auth for all users. 2) Create a test user and exclude them from the policy. 3) Use a mail client (Thunderbird) configured with basic auth IMAP. 4) Try connecting as a non-excluded user — verify blocked. 5) Try as the excluded service account — verify allowed. 6) Check Sign-in logs — filter by Client App to see legacy auth attempts. 7) Review which legacy auth protocols are still in use in your org."
+          }
+        },
+        {
+          "id": "m365003",
+          "difficulty": "intermediate",
+          "type": "open",
+          "question": "Walk through the complete setup of shared mailboxes for three team inboxes (support@, billing@, info@): creation, delegation, Outlook auto-mapping, send-as vs send-on-behalf, and the licensing gotcha with large mailboxes.",
+          "idealResponse": "Creation: New-Mailbox -Shared -Name 'Support Team' -DisplayName 'Support Team' -Alias support -PrimarySmtpAddress support@company.com. Or EAC > Recipients > Mailboxes > Add shared mailbox. Delegation — Full Access (open the mailbox): Add-MailboxPermission -Identity support@company.com -User john@company.com -AccessRights FullAccess -AutoMapping $true. AutoMapping $true means the mailbox automatically appears in the user's Outlook without any action on their part. Set to $false if you want manual addition only. Send As (email appears from support@, not john@): Add-RecipientPermission -Identity support@company.com -Trustee john@company.com -AccessRights SendAs. Send on Behalf (email shows 'John Smith on behalf of Support Team'): Set-Mailbox -Identity support@company.com -GrantSendOnBehalfTo john@company.com. Send As is usually preferred — recipients see support@company.com, not the individual's name. Outlook auto-mapping: with FullAccess + AutoMapping $true, Outlook adds the shared mailbox automatically within 30 minutes — no client configuration needed. In OWA: always visible under the user's mailboxes. Manual add in Outlook: File > Add Account > type the shared mailbox email — doesn't need a password (uses delegated access). Licensing gotcha: Shared mailboxes under 50GB storage don't require a separate license. Over 50GB: requires at minimum an Exchange Online Plan 1 license assigned directly to the shared mailbox. Also: if applying compliance features (litigation hold, retention policies to the shared mailbox), the shared mailbox needs appropriate compliance licensing. Security: block sign-in for shared mailbox accounts — they should never be signed into directly. Set-MsolUser -UserPrincipalName support@company.com -BlockCredential $true (or block via Entra portal).",
+          "lab": {
+            "title": "Home Lab: Shared Mailbox Automation",
+            "steps": "1) Create 3 shared mailboxes via PowerShell (EXO). 2) Add yourself as delegate with FullAccess and SendAs. 3) Connect to OWA — verify shared mailboxes appear automatically. 4) Send an email from support@ — verify headers show support@, not your personal address. 5) Test Send on Behalf — observe the 'on behalf of' display. 6) Check mailbox size: Get-MailboxStatistics -Identity support@ | Select TotalItemSize. 7) Practice removing delegation: Remove-MailboxPermission for an offboarded employee."
+          }
+        },
+        {
+          "id": "m365004",
+          "difficulty": "advanced",
+          "type": "mcq",
+          "question": "During a hybrid Exchange migration, internal on-premises senders receive NDR '550 5.1.1 user@domain.com: User unknown' when emailing a user whose mailbox was recently migrated to Exchange Online. External senders can reach the mailbox fine. What is the cause?",
+          "options": [
+            "The MX record wasn't updated to point to Exchange Online — update it and the issue resolves",
+            "The on-premises Exchange server still has a local mailbox stub for the migrated user and is trying to deliver mail locally instead of routing it to Exchange Online via the hybrid send connector — the Remote Routing Address (MEU) is not correctly configured",
+            "The Exchange Online certificate has expired, causing the hybrid connector to reject inbound mail",
+            "The user's Exchange Online mailbox requires MFA and the internal senders are using legacy protocols"
+          ],
+          "answer": "B",
+          "explanation": "This is the classic hybrid Exchange routing issue. After migration: external senders use MX → Exchange Online Protection → Exchange Online (works because MX updated). Internal senders (still on-prem Exchange) route internally first — on-prem Exchange checks its recipient list. If the migration didn't properly convert the on-premises mailbox to a Mail User (MEU — Mail Enabled User) or Remote Mailbox, on-prem Exchange treats the user as still local, can't find their mailbox, and generates NDR. Fix: ensure the migration properly converted the on-premises object to a Remote Mailbox: Get-RemoteMailbox user@domain.com. The RemoteRoutingAddress should be user@tenant.mail.onmicrosoft.com. If missing: Enable-RemoteMailbox user@domain.com -RemoteRoutingAddress user@tenant.mail.onmicrosoft.com. Also verify the Hybrid Send Connector is configured to route @tenant.mail.onmicrosoft.com addresses to Exchange Online.",
+          "lab": {
+            "title": "Home Lab: Hybrid Exchange Simulation",
+            "steps": "1) If you have an M365 dev tenant + a local Exchange or just study the migration documentation. 2) Practice the commands: Get-RemoteMailbox, Enable-RemoteMailbox, Get-HybridMailflowDatacenterIPs. 3) Use Microsoft's Hybrid Configuration Wizard documentation to understand each step. 4) Simulate the NDR scenario by creating a recipient that looks local but should route to cloud. 5) Use the Exchange Remote Connectivity Analyzer (testconnectivity.microsoft.com) to verify hybrid mail flow."
+          }
+        },
+        {
+          "id": "m365005",
+          "difficulty": "advanced",
+          "type": "open",
+          "question": "A phishing email was sent to 200 users in your tenant. You need to: find all users who received it, check which ones clicked the link, remove the email from all mailboxes, and prevent future delivery of the same email. Walk through the complete process using M365 security tools.",
+          "idealResponse": "Step 1 — Scope the threat (Microsoft Defender Threat Explorer): Security.microsoft.com > Email & Collaboration > Explorer. Search by sender domain, subject line, or URL. Set time range to cover when the phishing was sent. Identify: total recipients, users who clicked (URL click data if you have Safe Links), users who replied, any with attachments opened. Step 2 — Remove from all mailboxes (Content Search / Purge): Open Microsoft Purview compliance portal. New Content Search: search by sender and subject across all mailboxes. Run search and review results. Create New-ComplianceSearchAction: -SearchName 'PhishingRemoval' -Purge -PurgeType SoftDelete (moves to Recoverable Items — preservable for forensics) or HardDelete (permanent). Run: Get-ComplianceSearchAction to monitor progress. You need the 'Search And Purge' role. Step 3 — Block future delivery (Tenant Allow/Block List): Security portal > Policies > Tenant Allow/Block Lists. Add: the sender's domain/email to Blocked Senders. Add: the malicious URL to Blocked URLs. If malware was attached: block the file hash. These blocks apply to all inbound mail immediately. Step 4 — Investigate clicked users: For every user who clicked the link: check their sign-in logs for suspicious activity post-click. Check for new inbox rules created post-click (forwarding rules). Check MFA registration for new authenticator apps. Check for OAuth app consents granted. Any user who clicked a credential harvesting page is a potential credential compromise — treat as active incident, revoke sessions, reset password. Step 5 — Submit to Microsoft: Submit the phishing email to Microsoft via the Submissions portal (security.microsoft.com > Submissions) — improves Microsoft's detection models. Step 6 — Communicate: Notify users who received the email (especially those who clicked) via a separate channel (Teams, phone) — not email, in case their account is compromised.",
+          "lab": {
+            "title": "Home Lab: Phishing Response Simulation",
+            "steps": "1) In M365 dev tenant, use Microsoft Attack Simulator (Security portal > Attack simulation training). 2) Send a simulated phishing campaign to your test users. 3) Practice Threat Explorer: find all recipients, identify who clicked. 4) Run a Content Search for the simulated email. 5) Practice the Purge action (safe to test in dev tenant). 6) Review the Simulation report to understand click rates and user vulnerability. 7) Add a domain to the Tenant Allow/Block list and verify it blocks future mail."
+          }
+        }
+      ]
+    }
+  }
+}

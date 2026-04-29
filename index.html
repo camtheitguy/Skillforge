@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="IT & Cybersecurity Skills Assessment — adaptive question bank with rotating questions, open-response ideal answers, and home lab scenarios. Built for MSP techs and security practitioners.">
+  <title>SKILLS AUDIT v2 — IT & Cybersecurity Assessment</title>
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+
+<div class="wrap">
+
+  <!-- ══════════════════════════════════════════════════════════════════════ -->
+  <!-- SITE HEADER                                                           -->
+  <!-- ══════════════════════════════════════════════════════════════════════ -->
+  <header class="site-header">
+    <div>
+      <div class="logo">SKILLS AUDIT</div>
+      <div class="logo-sub">IT &amp; Cybersecurity · Adaptive Assessment · V2.0</div>
+    </div>
+    <div class="header-right">
+      <div class="live-pill">
+        <span class="live-dot"></span>
+        LIVE GRADING
+      </div>
+      <div id="header-counter">0 / 0 answered</div>
+    </div>
+  </header>
+
+  <!-- ══════════════════════════════════════════════════════════════════════ -->
+  <!-- INIT SPINNER (shown while JSON loads)                                 -->
+  <!-- ══════════════════════════════════════════════════════════════════════ -->
+  <div id="init-spinner">
+    <div class="spinner"></div>
+    <div class="spinner-label">LOADING QUESTION BANK...</div>
+  </div>
+  <div id="init-error"></div>
+
+  <!-- ══════════════════════════════════════════════════════════════════════ -->
+  <!-- SCREEN 1: DOMAIN SELECT                                               -->
+  <!-- ══════════════════════════════════════════════════════════════════════ -->
+  <div id="screen-domain">
+
+    <div class="sec-label">Step 01 — Configure</div>
+    <div class="scr-title">SELECT YOUR DOMAINS</div>
+    <div class="scr-desc">
+      Pick up to 6 domains. 5 questions per domain are pulled from a rotating pool each session —
+      you won't see the same questions twice in a row. MCQ answers shuffle positions every time.
+      Open-ended questions include textbook-quality ideal responses for self-assessment.
+      Every question includes a home lab scenario to build the real skill.
+    </div>
+
+    <!-- Domain cards injected by JS -->
+    <div class="domain-grid" id="domain-grid"></div>
+
+    <div class="tag-strip" id="sel-tags"></div>
+
+    <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
+      <button class="btn btn-primary" id="start-btn" disabled onclick="App.startAssessment()">
+        START ASSESSMENT →
+      </button>
+      <span class="sel-meta" id="sel-count">0 domains selected (max 6)</span>
+    </div>
+
+  </div><!-- /screen-domain -->
+
+  <!-- ══════════════════════════════════════════════════════════════════════ -->
+  <!-- SCREEN 2: QUESTION                                                    -->
+  <!-- ══════════════════════════════════════════════════════════════════════ -->
+  <div id="screen-question">
+
+    <!-- Progress bar -->
+    <div class="prog-wrap">
+      <div class="prog-fill" id="prog-fill" style="width:0%"></div>
+    </div>
+
+    <!-- Question meta -->
+    <div class="q-meta">
+      <div class="q-domain-tag" id="q-tag">DOMAIN</div>
+      <div class="q-diff"       id="q-diff">DIFFICULTY: —</div>
+    </div>
+
+    <div class="q-num"  id="q-num">Q1 of 0</div>
+    <div class="q-text" id="q-text"></div>
+    <pre class="q-code" id="q-code"></pre>
+
+    <!-- MCQ options (rendered by JS) -->
+    <div class="ans-area" id="ans-area"></div>
+
+    <!-- Open response -->
+    <div id="open-wrap">
+      <div class="open-hint">// OPEN RESPONSE — model answer revealed after submit</div>
+      <textarea id="open-ans" rows="6"
+        placeholder="Write what you actually know. Model answer revealed after submit.">
+      </textarea>
+    </div>
+
+    <!-- ── Feedback Panel ───────────────────────────────────────────────── -->
+    <div class="fb-box" id="fb-box">
+
+      <div id="fb-label">RESULT</div>
+
+      <!-- User's open answer (shown for open questions) -->
+      <div id="fb-user-answer">
+        <div class="fb-ua-label">YOUR ANSWER</div>
+        <div id="fb-ua-text"></div>
+      </div>
+
+      <!-- Explanation / Ideal Response -->
+      <div id="fb-explanation"></div>
+
+      <!-- Self-assessment prompt (open questions only) -->
+      <div id="fb-self-assess"></div>
+
+      <!-- Lab scenario (all questions) -->
+      <div id="fb-lab">
+        <div class="fb-lab-header">HOME LAB SCENARIO</div>
+        <div id="fb-lab-title"></div>
+        <div id="fb-lab-steps"></div>
+      </div>
+
+      <!-- Running score -->
+      <div id="score-tally"></div>
+
+    </div><!-- /fb-box -->
+
+    <!-- Action buttons -->
+    <div class="q-actions">
+      <button class="btn btn-primary" id="sub-btn" onclick="App.submitAnswer()">
+        SUBMIT ANSWER
+      </button>
+      <button class="btn btn-ghost" id="nxt-btn" style="display:none" onclick="App.nextQuestion()">
+        NEXT →
+      </button>
+    </div>
+
+  </div><!-- /screen-question -->
+
+  <!-- ══════════════════════════════════════════════════════════════════════ -->
+  <!-- SCREEN 3: RESULTS                                                     -->
+  <!-- ══════════════════════════════════════════════════════════════════════ -->
+  <div id="screen-results">
+
+    <!-- Grade ring -->
+    <div class="res-head">
+      <div class="grade-ring">
+        <svg width="152" height="152" viewBox="0 0 152 152">
+          <circle class="ring-bg"   cx="76" cy="76" r="63"/>
+          <circle class="ring-fill" id="ring-fill"
+            cx="76" cy="76" r="63"
+            stroke-dasharray="395.8"
+            stroke-dashoffset="395.8"
+            stroke="url(#ringGrad)"/>
+          <defs>
+            <linearGradient id="ringGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+              <stop offset="0%"   stop-color="#00e5ff"/>
+              <stop offset="55%"  stop-color="#b8ff57"/>
+              <stop offset="100%" stop-color="#ff3c6e"/>
+            </linearGradient>
+          </defs>
+        </svg>
+        <div class="grade-inner">
+          <div id="grade-pct">—</div>
+          <div id="grade-tier">SCORE</div>
+        </div>
+      </div>
+      <div id="res-title">ASSESSMENT COMPLETE</div>
+      <div id="res-sub"></div>
+    </div>
+
+    <!-- Domain breakdown -->
+    <div class="sec-label">Domain Breakdown</div>
+    <div id="bk-wrap" style="margin-bottom:40px;"></div>
+
+    <!-- Verdict -->
+    <div class="sec-label">Honest Verdict</div>
+    <div class="verdict-box">
+      <div class="verdict-title">// DEBRIEF</div>
+      <div id="verdict-text"></div>
+    </div>
+
+    <!-- Question review -->
+    <div class="sec-label" style="margin-bottom:13px;">
+      Question Review — tap to expand · includes lab scenarios
+    </div>
+    <div id="q-review" style="margin-bottom:36px;"></div>
+
+    <!-- Actions -->
+    <div style="display:flex; gap:12px; flex-wrap:wrap;">
+      <button class="btn btn-primary" onclick="App.restart()">RETAKE (NEW ROTATION)</button>
+      <button class="btn btn-ghost"   onclick="App.changeDomains()">CHANGE DOMAINS</button>
+    </div>
+
+  </div><!-- /screen-results -->
+
+</div><!-- /wrap -->
+
+<!-- ── Scripts (order matters: engine → ui → app) ──────────────────────── -->
+<script src="js/engine.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/app.js"></script>
+
+</body>
+</html>
