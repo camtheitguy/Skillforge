@@ -6,7 +6,47 @@
   <meta name="description" content="IT & Cybersecurity Skills Assessment — adaptive question bank with rotating questions, open-response ideal answers, and home lab scenarios. Built for MSP techs and security practitioners.">
   <title>Skill Forge — IT & Cybersecurity Assessment</title>
   <link rel="stylesheet" href="css/styles.css">
+<script src="js/auth.js"></script>
+<script>
+  // Require login on main app
+  Auth.requireLogin();
+</script>
+  
 </head>
+
+  <div id="auth-header" style="
+  position: fixed;
+  top: 0;
+  right: 0;
+  padding: 14px 24px;
+  z-index: 998;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  font-family: 'Space Mono', monospace;
+  font-size: 10px;
+  color: var(--text2);
+">
+  <span id="logged-user">Welcome, <strong id="username-display">User</strong></span>
+  <button id="logout-btn" class="btn btn-ghost" style="padding: 6px 14px; font-size: 9px;">
+    LOGOUT
+  </button>
+</div>
+
+<script>
+  // Display username and set up logout
+  document.addEventListener('DOMContentLoaded', () => {
+    const user = Auth.getUser();
+    if (user.username) {
+      document.getElementById('username-display').textContent = user.username;
+    }
+
+    document.getElementById('logout-btn').addEventListener('click', () => {
+      Auth.logout();
+    });
+  });
+</script>
+  
 <body>
 
 <div class="wrap">
